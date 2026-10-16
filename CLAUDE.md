@@ -12,6 +12,7 @@
 
 ## Regras (servidor partilhado com outros trabalhos)
 - Trabalhar SÓ dentro desta pasta.
+- Perguntar antes de apagar qualquer ficheiro.
 - Nunca mexer em ../agentic-hpga, ../phase2, ../phase2_agent_memory,
   /scratch/pcanaste/venv nem no Ollama.
 - Nunca parar processos: o Ollama usa a GPU para outro trabalho.
