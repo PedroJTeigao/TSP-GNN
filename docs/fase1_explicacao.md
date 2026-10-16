@@ -535,6 +535,49 @@ iguais.
 ≈ 36 ms (TSP-20) e ≈ 450 ms (TSP-50) de CPU por instância. Mas a esta escala a qualidade do
 LKH é muito superior.
 
+### Sobre a aplicação final (rebalanceamento de carteiras)
+
+> ⚠️ Respostas baseadas no plano da secção 11, que ainda está **por confirmar com o professor**.
+
+**Porque não usar só o MILP?**
+- Em problemas pequenos, o MILP resolve tudo sozinho. Encontra o ótimo e ainda diz quão longe
+  pode estar do ótimo enquanto procura.
+- O problema é o tempo. Com muitos ativos, corretoras e moedas, os custos fixos criam muitas
+  decisões de sim/não, e o tempo de resolução pode explodir. Isto é sério quando o
+  rebalanceamento tem de ser feito depressa ou muitas vezes.
+- A GNN não substitui o MILP: **acelera-o**, dando-lhe um bom ponto de partida ou fixando as
+  operações óbvias. A viabilidade e o custo continuam a ser garantidos pelo solver e pelo código.
+- Resposta honesta: se o MILP já for rápido o suficiente nos tamanhos reais, a GNN não faz
+  falta. Por isso, **o primeiro passo é medir quanto tempo o MILP demora** nesses tamanhos.
+
+**Se o fluxo de custo mínimo é um problema fácil, porque é que este é NP-difícil?** Com custos
+só proporcionais, o fluxo de custo mínimo é um problema linear e resolve-se em tempo
+polinomial. O custo fixo acrescenta uma decisão de sim/não por operação ("pago a corretagem
+fixa ou não?"), e é a combinação destas decisões que torna o problema NP-difícil.
+
+**Como se garante que a solução é viável, se a GNN pode errar?** A GNN não dá a solução final:
+só sugere que operações usar. O solver completa a solução e o código verifica-a (limites,
+quantidades, custo), tal como o `verify_tour` fazia na fase 1.
+
+**De onde vêm os dados de treino?** Da mesma forma que na fase 1: gerar muitas instâncias
+sintéticas (carteiras, custos, limites de liquidez) e resolvê-las com o MILP, que faz de
+professor. Os detalhes do gerador ainda estão por definir.
+
+**O problema de generalização da fase 1 também aparece aqui?** Provavelmente sim. O número de
+ativos, de corretoras e de moedas muda de caso para caso, e os montantes e os custos têm
+escalas muito diferentes. A lição da escala das distâncias (secção 10), e a sua correção na
+fase 2, aplica-se diretamente: as entradas da rede terão de ser normalizadas.
+
+**Porque não pôr a LLM a resolver o problema?** Uma LLM não garante que a solução seja viável
+nem que seja ótima, e erra contas. Serve para o que faz bem: traduzir os objetivos do gestor
+em restrições e verificar regras escritas em linguagem natural. A otimização fica com o solver
+e a verificação com o código.
+
+**Como se trata o impacto de mercado, que não é linear?** O impacto costuma crescer mais
+depressa do que a quantidade negociada. Num MILP, uma forma habitual de o tratar é
+aproximá-lo por troços de reta (*aproximação linear por troços*). Fica por confirmar que
+modelo de impacto se vai usar.
+
 ---
 
 ## 13. Glossário
@@ -547,9 +590,16 @@ LKH é muito superior.
 - **BCE (entropia cruzada binária):** perda para classificação sim/não.
 - **Christofides:** heurística com garantia de ≤ 1,5 × o ótimo.
 - **Cobertura:** % das arestas do tour ótimo presentes no grafo k-NN.
+- **Corretagem:** comissão cobrada pela corretora por cada operação; pode ter uma parte fixa e
+  uma parte proporcional ao montante.
+- **Custo fixo:** custo que se paga só por fazer uma operação, seja qual for a quantidade.
 - **Embedding:** vetor de números que representa uma entrada (coordenadas, distância).
 - **Época:** uma passagem completa pelos dados de treino.
 - **Equivariância a permutações:** renumerar as cidades não muda as previsões.
+- **Fixed-charge network flow (fluxo em rede com custos fixos):** fluxo de custo mínimo em que
+  cada operação tem também um custo fixo, pago só se for usada; é NP-difícil.
+- **Fluxo de custo mínimo:** enviar quantidades através de uma rede, de onde existem para onde
+  são precisas, ao menor custo; com custos só proporcionais, resolve-se em tempo polinomial.
 - **Fora da distribuição:** dados diferentes dos vistos no treino (ex.: distâncias mais pequenas).
 - **Gap de otimalidade:** quanto (%) um tour é mais comprido do que o do LKH.
 - **Generalização:** funcionar bem em dados diferentes dos de treino (ex.: 20 → 50 cidades).
@@ -557,17 +607,29 @@ LKH é muito superior.
 - **Guloso:** escolhe sempre a melhor opção imediata, sem voltar atrás.
 - **Heatmap:** matriz de probabilidades de cada aresta estar no tour.
 - **Heurística:** método rápido que dá boas soluções sem garantia de ótimo.
+- **Impacto de mercado (slippage):** variação desfavorável do preço causada pela nossa própria
+  ordem; cresce mais depressa do que a quantidade negociada.
 - **k-NN:** ligar cada cidade às suas k vizinhas mais próximas.
 - **LKH:** Lin–Kernighan–Helsgaun, heurística de topo para o TSP; o nosso "professor".
 - **Ligação residual:** somar a entrada de uma camada à sua saída (h + f(h)).
 - **Logit:** saída da rede antes da sigmoide; probabilidade = sigmoide(logit).
 - **Message passing:** cada nó recebe, agrega e usa informação dos vizinhos.
+- **MILP (programação linear inteira mista):** otimização com restrições lineares e variáveis
+  contínuas (quantidades) e inteiras ou de sim/não (usar ou não uma operação); resolvida por
+  solvers como o Gurobi e o OR-Tools.
 - **NP-difícil:** classe de problemas sem algoritmo polinomial conhecido para o ótimo.
+- **OptiMUS:** sistema que usa LLMs para traduzir problemas descritos em linguagem natural em
+  modelos de otimização.
 - **Ótimo local:** solução que nenhuma pequena alteração (ex.: troca 2-opt) melhora.
 - **p-valor:** probabilidade de uma diferença tão grande aparecer por acaso.
+- **Ponto de partida (warm start):** solução inicial dada ao solver para ele começar mais perto
+  do ótimo e terminar mais depressa.
 - **pos_weight:** peso extra das arestas positivas na perda (≈ 5,05).
+- **Rebalanceamento:** comprar e vender ativos para passar da carteira atual para a carteira-alvo.
 - **Seed:** número que fixa a aleatoriedade, para os resultados serem reprodutíveis.
 - **Sigmoide (σ):** função que transforma qualquer número num valor entre 0 e 1.
+- **Slippage:** ver *impacto de mercado*.
+- **Solver:** programa que resolve um problema de otimização (ex.: LKH, Gurobi, OR-Tools).
 - **Subciclo:** ciclo fechado que não passa por todas as cidades (proibido num tour).
 - **Teste emparelhado:** compara dois métodos nas mesmas instâncias.
 - **Tour:** percurso que visita cada cidade uma vez e volta ao início.
