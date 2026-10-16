@@ -4,3 +4,5 @@ results/
 tmp/
 *.pt
 .claude/settings.local.json
+__pycache__/
+.pytest_cache/
