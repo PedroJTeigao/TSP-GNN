@@ -1,0 +1,6 @@
+.venv/
+data/
+results/
+tmp/
+*.pt
+.claude/settings.local.json

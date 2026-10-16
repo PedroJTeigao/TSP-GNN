@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(//scratch/pcanaste/projeto/agentic-hpga/**)",
+      "Edit(//scratch/pcanaste/projeto/phase2/**)",
+      "Edit(//scratch/pcanaste/projeto/phase2_agent_memory/**)",
+      "Edit(//scratch/pcanaste/venv/**)",
+      "Edit(//scratch/pcanaste/ollama/**)",
+      "Edit(//scratch/pcanaste/ollama-models/**)",
+      "Bash(kill *)",
+      "Bash(pkill *)",
+      "Bash(killall *)"
+    ]
+  }
+}
