@@ -410,18 +410,85 @@ resultados são **coerentes** com esta explicação, mas só a experiência da f
 - Treinar também em TSP-50 (`tsp50_train`).
 - Igualar o nº de parâmetros entre modelos; treinar mais épocas.
 
-**Aplicação a carteiras (a confirmar com o professor)** — o plano concreto não está definido
-neste repositório; uma ligação natural: a **seleção de carteiras com restrição de
-cardinalidade** (escolher K de N ativos) também é combinatória. A receita da fase 1 transfere-se:
-um grafo de ativos (ligados, por exemplo, pela correlação), uma GNN que prevê a probabilidade de
-cada ativo entrar na carteira (como o heatmap), um solver exato em instâncias pequenas como
-professor, e uma decodificação que garante as restrições + melhoria local (como gulosa + 2-opt).
+### Aplicação final: rebalanceamento de carteiras com custos de transação
 
-**Papel da LLM (a confirmar com o professor)** — possibilidades a discutir: uma LLM como
-*agente* que orquestra a pipeline (escolhe solver, decodificação e hiperparâmetros), que
-**gera heurísticas** em código e as avalia automaticamente, ou que **explica** as decisões e os
-resultados. A fase 1 dá a infraestrutura de avaliação (baselines, gap, testes estatísticos)
-necessária para qualquer uma destas opções.
+> ⚠️ **Tudo o que está nesta subsecção está por confirmar com o professor.**
+
+**O problema.** Um gestor tem uma carteira atual e quer chegar a uma **carteira-alvo**. Para
+isso compra e vende ativos em **várias corretoras** e em **várias moedas**, e quer fazê-lo com o
+**menor custo total** possível. Os custos são de vários tipos:
+- **corretagens fixas** (paga-se um valor só por fazer a operação) e **proporcionais** (uma
+  percentagem do montante);
+- **câmbio** (converter entre moedas);
+- **impacto de mercado / slippage** (ordens grandes movem o preço contra nós).
+
+**Não é um TSP.** No TSP decide-se *que arestas* usar e *em que ordem*. Aqui decide-se sobretudo
+**quanto** comprar ou vender e **onde**, e o custo depende da quantidade. A formulação natural é
+um **fluxo de custo mínimo em rede com custos fixos** (*fixed-charge network flow*):
+- o dinheiro e os ativos "fluem" pela rede, da carteira atual para a carteira-alvo;
+- cada operação tem um custo proporcional à quantidade **mais** um custo fixo que se paga só
+  se a operação for usada.
+
+É esse custo fixo que torna o problema difícil. Para cada operação há uma decisão de sim/não
+("uso ou não uso?"), e essas decisões combinam-se de forma explosiva, como as arestas no TSP.
+O problema é **NP-difícil**.
+
+**Correspondência com a fase 1:**
+
+| Fase 1 (TSP) | Rebalanceamento |
+|---|---|
+| cidades | posições (ativo × corretora) e caixa em cada moeda |
+| arestas | operações possíveis: vender, comprar, converter, transferir |
+| distância | custo da operação |
+| tour | fluxo da carteira atual para a carteira-alvo |
+| (não existe) | capacidades: limites de liquidez de cada operação |
+| "esta aresta está no tour?" | "esta operação é usada?" |
+| LKH (professor) | solver MILP (Gurobi / OR-Tools) |
+
+A ideia central mantém-se: a GNN aprende com um solver exato a prever **que operações são
+usadas**, tal como na fase 1 previa que arestas estavam no tour. Há uma diferença no papel da
+GNN. No TSP, a GNN produzia diretamente um tour, através da decodificação. Aqui pode servir
+sobretudo para **acelerar o solver**, por exemplo:
+- dando-lhe um bom ponto de partida;
+- fixando à partida as operações em que a GNN está muito confiante, para o solver só ter de
+  decidir o resto.
+
+**O grafo já vem dado.** No TSP tivemos de escolher que arestas pôr no grafo (o k-NN com k=10).
+Aqui o grafo são as operações que existem de facto, por isso **não se usa k-NN**. A lição que
+se transfere é outra: **medir a cobertura**. Se se cortarem operações para simplificar o
+problema, é preciso verificar que as operações da solução ótima continuam no grafo, como
+fizemos com os 99,9% do passo 2.
+
+**A ordem das operações** só importa em casos específicos, e fica por confirmar com o professor
+se faz parte do problema:
+- vender antes de comprar, quando não há caixa suficiente;
+- conversões de moeda encadeadas;
+- impacto de mercado que depende do momento em que se negocia.
+
+**O que se reaproveita da fase 1:**
+- a ideia de prever, para cada aresta, a probabilidade de ser usada;
+- o solver exato como professor;
+- o gap face ao ótimo como medida;
+- as baselines;
+- as várias seeds e os testes emparelhados com Wilcoxon e Bonferroni.
+
+### Papel da LLM
+
+> ⚠️ **Também por confirmar com o professor.**
+
+A LLM fica **fora** do cálculo da solução e tem dois papéis:
+
+1. **Traduzir os objetivos do gestor em restrições.** O gestor diz em linguagem natural o que
+   quer, por exemplo "manter pelo menos 20% em obrigações" ou "não usar a corretora Y". A LLM
+   converte isso em restrições do modelo de otimização. É a abordagem do **OptiMUS**.
+2. **Verificar se a solução cumpre regras que não foram formalizadas.** Por exemplo, "não
+   vender a posição X por razões fiscais", quando essa regra nunca chegou a ser escrita como
+   restrição.
+
+**A verificação formal continua a ser feita por código.** Confirmar que a solução é viável
+(respeita os limites, as quantidades batem certo) e calcular o seu custo não depende da LLM.
+É o mesmo princípio que o `verify_tour` da fase 1: a validade verifica-se sempre com código,
+nunca se assume.
 
 ---
 
