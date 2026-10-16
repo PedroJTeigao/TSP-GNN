@@ -1,4 +1,4 @@
-"""Testes rápidos para src/tsp_gnn/train.py (no CPU).  Correr com: pytest tests/"""
+"""Quick tests for src/tsp_gnn/train.py (on the CPU).  Run with: pytest tests/"""
 
 import torch
 from torch_geometric.data import Data
@@ -21,11 +21,11 @@ def small_graphs(num=8, n=20):
 def test_pos_weight_by_hand():
     g1 = Data(y=torch.tensor([1., 0., 0., 0.]), edge_index=torch.zeros(2, 4, dtype=torch.long))
     g2 = Data(y=torch.tensor([1., 1., 0., 0.]), edge_index=torch.zeros(2, 4, dtype=torch.long))
-    assert compute_pos_weight([g1, g2]) == 5 / 3        # 5 negativas / 3 positivas
+    assert compute_pos_weight([g1, g2]) == 5 / 3        # 5 negatives / 3 positives
 
 
 def test_can_overfit_tiny_dataset():
-    # Se o modelo nem consegue decorar 8 grafos, há um erro no ciclo de treino.
+    # If the model cannot even memorize 8 graphs, there is a bug in the training loop.
     torch.manual_seed(0)
     graphs = small_graphs()
     loader = DataLoader(graphs, batch_size=8)
@@ -37,11 +37,11 @@ def test_can_overfit_tiny_dataset():
 
 
 def test_predict_probs_splits_per_graph():
-    # Separar o batch por grafo tem de dar o mesmo que correr o modelo grafo a grafo.
+    # Splitting the batch per graph must give the same as running the model graph by graph.
     torch.manual_seed(0)
     graphs = small_graphs(num=5)
     model = EdgeGNN("gat").eval()
-    probs, _ = predict_probs(model, graphs, batch_size=3)  # 3 não divide 5: testa o último batch
+    probs, _ = predict_probs(model, graphs, batch_size=3)  # 3 does not divide 5: tests the last batch
     assert len(probs) == len(graphs)
     with torch.no_grad():
         for g, p in zip(graphs, probs):

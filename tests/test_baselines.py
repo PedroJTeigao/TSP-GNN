@@ -1,4 +1,4 @@
-"""Testes rápidos para src/tsp_gnn/baselines.py.  Correr com: pytest tests/"""
+"""Quick tests for src/tsp_gnn/baselines.py.  Run with: pytest tests/"""
 
 import numpy as np
 import pytest
@@ -22,7 +22,7 @@ def test_valid_tours(heuristic):
 
 
 def test_christofides_within_1_5_of_optimum():
-    # Garantia teórica do Christofides em instâncias métricas: <= 1,5x o ótimo.
+    # Christofides' theoretical guarantee on metric instances: <= 1.5x the optimum.
     for coords in generate_instances(num=20, n=20, seed=5):
         opt = tour_length(coords, solve_lkh(coords))
         assert tour_length(coords, christofides_tour(coords)) <= 1.5 * opt + 1e-9

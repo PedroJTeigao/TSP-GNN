@@ -1,7 +1,7 @@
-"""Teste de sanidade da decodificação: usa os rótulos verdadeiros como probabilidades.
+"""Decoding sanity check: uses the true labels as probabilities.
 
-Com a "rede perfeita", os grafos com cobertura total têm de dar o tour do LKH (gap 0%).
-Exemplo:
+With the "perfect network", graphs with full coverage must give the LKH tour (gap 0%).
+Example:
     python scripts/check_decode.py --data data/tsp20_test.npz data/tsp50_test.npz
 """
 
@@ -17,22 +17,22 @@ from tsp_gnn.graph import instance_to_data
 
 
 def check(path, k):
-    """Decodifica cada instância de `path` com probs = y e devolve uma linha por instância."""
+    """Decode each instance of `path` with probs = y and return one row per instance."""
     d = load_dataset(path)
     rows = []
     for coords, lkh_tour, opt_len in zip(d["coords"], d["tours"], d["lengths"]):
         n = len(coords)
         g = instance_to_data(coords, lkh_tour, opt_len, k)
         start = time.perf_counter()
-        heat, in_graph = edge_heatmap(g.edge_index, g.y, n)   # probs = rótulos verdadeiros
+        heat, in_graph = edge_heatmap(g.edge_index, g.y, n)   # probs = true labels
         greedy = verify_tour(greedy_decode(heat, in_graph, coords), n)
         improved = verify_tour(two_opt(coords, greedy), n)
         elapsed = time.perf_counter() - start
         rows.append({
-            "full": int(g.y.sum()) == 2 * n,                  # cobertura total do tour no k-NN
+            "full": int(g.y.sum()) == 2 * n,                  # full tour coverage in the k-NN
             "gap_greedy": optimality_gap(tour_length(coords, greedy), opt_len),
             "gap_2opt": optimality_gap(tour_length(coords, improved), opt_len),
-            "same_greedy": tour_edges(greedy) == tour_edges(lkh_tour),  # mesmas arestas que o LKH
+            "same_greedy": tour_edges(greedy) == tour_edges(lkh_tour),  # same edges as LKH
             "same_2opt": tour_edges(improved) == tour_edges(lkh_tour),
             "ms": 1000 * elapsed,
         })
@@ -40,18 +40,18 @@ def check(path, k):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sanidade da decodificação com rótulos verdadeiros.")
-    parser.add_argument("--data", nargs="+", required=True, help="ficheiros .npz de make_dataset.py")
-    parser.add_argument("--k", type=int, default=10, help="número de vizinhos do grafo k-NN")
+    parser = argparse.ArgumentParser(description="Decoding sanity check with the true labels.")
+    parser.add_argument("--data", nargs="+", required=True, help=".npz files from make_dataset.py")
+    parser.add_argument("--k", type=int, default=10, help="number of neighbours in the k-NN graph")
     args = parser.parse_args()
 
-    header = (f"{'grupo':<12}{'grafos':>7}  {'gap gulosa (méd / máx)':>24}  "
-              f"{'gap +2-opt (méd / máx)':>24}  {'igual LKH (gul / 2opt)':>23}  {'ms/inst':>8}")
+    header = (f"{'group':<12}{'graphs':>7}  {'greedy gap (mean / max)':>24}  "
+              f"{'+2-opt gap (mean / max)':>24}  {'same as LKH (gr / 2opt)':>23}  {'ms/inst':>8}")
     for path in args.data:
         rows = check(path, args.k)
         print(f"=== {path} ===")
         print(header)
-        for name, full in [("cob. total", True), ("incompleta", False)]:
+        for name, full in [("full cov.", True), ("incomplete", False)]:
             group = [r for r in rows if r["full"] == full]
             if not group:
                 print(f"{name:<12}{0:>7}")

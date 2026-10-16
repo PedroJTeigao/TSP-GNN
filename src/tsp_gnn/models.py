@@ -1,9 +1,9 @@
-"""GNNs que preveem, para cada aresta do grafo k-NN, se pertence ao tour.
+"""GNNs that predict, for each edge of the k-NN graph, whether it belongs to the tour.
 
-EdgeGNN(kind) com kind em {'gcn', 'gat', 'gated'}:
-    embeddings (coordenadas e distância) -> L camadas do encoder (residual + BatchNorm)
-    -> cabeça MLP([h_i, h_j, e_ij]) -> um logit por aresta.
-Convenção do PyG: edge_index[0] = origem j, edge_index[1] = destino i (i agrega de j).
+EdgeGNN(kind) with kind in {'gcn', 'gat', 'gated'}:
+    embeddings (coordinates and distance) -> L encoder layers (residual + BatchNorm)
+    -> MLP head([h_i, h_j, e_ij]) -> one logit per edge.
+PyG convention: edge_index[0] = source j, edge_index[1] = target i (i aggregates from j).
 """
 
 import torch
@@ -13,7 +13,7 @@ from torch_geometric.utils import scatter
 
 
 class GatedGCNLayer(nn.Module):
-    """Camada Gated GCN residual (Bresson & Laurent 2017; Joshi et al. 2019).
+    """Residual Gated GCN layer (Bresson & Laurent 2017; Joshi et al. 2019).
 
         ê_ij = A h_i + B h_j + C e_ij
         η_ij = σ(ê_ij) / (Σ_j' σ(ê_ij') + ε)
@@ -29,41 +29,41 @@ class GatedGCNLayer(nn.Module):
         self.eps = eps
 
     def forward(self, h, e, edge_index):
-        src, dst = edge_index                              # mensagem j=src -> i=dst
-        e_hat = self.A(h)[dst] + self.B(h)[src] + self.C(e)  # novo vetor de cada aresta
-        gate = torch.sigmoid(e_hat)                        # portas em [0,1], uma por dimensão
+        src, dst = edge_index                              # message j=src -> i=dst
+        e_hat = self.A(h)[dst] + self.B(h)[src] + self.C(e)  # new vector of each edge
+        gate = torch.sigmoid(e_hat)                        # gates in [0,1], one per dimension
         n = h.size(0)
         num = scatter(gate * self.V(h)[src], dst, dim=0, dim_size=n, reduce="sum")
         den = scatter(gate, dst, dim=0, dim_size=n, reduce="sum")
-        h_new = self.U(h) + num / (den + self.eps)         # média "suave" dos vizinhos
+        h_new = self.U(h) + num / (den + self.eps)         # "soft" average of the neighbours
         h = h + torch.relu(self.bn_h(h_new))               # residual + BatchNorm
         e = e + torch.relu(self.bn_e(e_hat))
         return h, e
 
 
 class EdgeGNN(nn.Module):
-    """Classificador de arestas com encoder GCN, GATv2 ou Gated GCN."""
+    """Edge classifier with a GCN, GATv2 or Gated GCN encoder."""
 
     def __init__(self, kind, hidden=64, layers=6, heads=4):
         super().__init__()
         self.kind = kind
-        self.node_embed = nn.Linear(2, hidden)             # coordenadas -> h⁰
-        self.edge_embed = nn.Linear(1, hidden)             # distância   -> e⁰
+        self.node_embed = nn.Linear(2, hidden)             # coordinates -> h⁰
+        self.edge_embed = nn.Linear(1, hidden)             # distance    -> e⁰
 
-        if kind == "gcn":      # média fixa pelos graus; não usa as distâncias
+        if kind == "gcn":      # fixed average weighted by degrees; does not use distances
             self.convs = nn.ModuleList(GCNConv(hidden, hidden) for _ in range(layers))
-        elif kind == "gat":    # atenção com a distância; 4 cabeças de hidden/4, concatenadas
+        elif kind == "gat":    # attention with the distance; 4 heads of hidden/4, concatenated
             self.convs = nn.ModuleList(
                 GATv2Conv(hidden, hidden // heads, heads=heads, concat=True, edge_dim=hidden)
                 for _ in range(layers))
-        elif kind == "gated":  # atualiza também um vetor por aresta
+        elif kind == "gated":  # also updates one vector per edge
             self.convs = nn.ModuleList(GatedGCNLayer(hidden) for _ in range(layers))
         else:
-            raise ValueError(f"kind desconhecido: {kind!r} (use 'gcn', 'gat' ou 'gated')")
-        if kind != "gated":    # a camada Gated já tem as suas BatchNorm
+            raise ValueError(f"unknown kind: {kind!r} (use 'gcn', 'gat' or 'gated')")
+        if kind != "gated":    # the Gated layer already has its own BatchNorms
             self.norms = nn.ModuleList(nn.BatchNorm1d(hidden) for _ in range(layers))
 
-        # Cabeça comum: [h_i, h_j, e_ij] -> logit da aresta (a sigmoide fica na perda).
+        # Shared head: [h_i, h_j, e_ij] -> edge logit (the sigmoid lives in the loss).
         self.head = nn.Sequential(
             nn.Linear(3 * hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -84,5 +84,5 @@ class EdgeGNN(nn.Module):
 
 
 def count_parameters(model):
-    """Número de parâmetros treináveis."""
+    """Number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

@@ -1,4 +1,4 @@
-"""Testes rápidos para src/tsp_gnn/data.py.  Correr com: pytest tests/"""
+"""Quick tests for src/tsp_gnn/data.py.  Run with: pytest tests/"""
 
 import itertools
 
@@ -9,7 +9,7 @@ from tsp_gnn.data import (generate_instances, is_valid_tour, load_dataset, save_
 
 
 def test_tour_length_unit_square():
-    # Os 4 cantos do quadrado unitário, percorridos pela ordem: perímetro = 4.
+    # The 4 corners of the unit square, visited in order: perimeter = 4.
     square = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
     assert np.isclose(tour_length(square, np.array([0, 1, 2, 3])), 4.0)
 
@@ -36,15 +36,15 @@ def test_save_load_roundtrip(tmp_path):
 
 
 def brute_force_optimum(coords):
-    """Ótimo exato: experimenta todas as ordens (fixando a cidade 0 no início)."""
+    """Exact optimum: tries every order (with city 0 fixed at the start)."""
     n = len(coords)
     return min(tour_length(coords, np.array((0,) + perm))
                for perm in itertools.permutations(range(1, n)))
 
 
 def test_lkh_matches_brute_force():
-    # 7 cidades -> 6! = 720 tours a testar por instância (instantâneo).
+    # 7 cities -> 6! = 720 tours to try per instance (instant).
     for coords in generate_instances(num=5, n=7, seed=42):
         lkh = tour_length(coords, solve_lkh(coords))
-        # Tolerância pequena: o LKH otimiza distâncias arredondadas a 1e-6.
+        # Small tolerance: LKH optimizes distances rounded to 1e-6.
         assert abs(lkh - brute_force_optimum(coords)) < 1e-5

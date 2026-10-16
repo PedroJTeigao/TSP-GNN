@@ -1,7 +1,7 @@
-"""Decodificação: das probabilidades das arestas (saída da GNN) a um tour válido.
+"""Decoding: from edge probabilities (the GNN output) to a valid tour.
 
-Fluxo: edge_heatmap -> greedy_decode -> two_opt (opcional) -> verify_tour -> optimality_gap.
-Tudo em NumPy, no CPU (uma instância de cada vez).
+Pipeline: edge_heatmap -> greedy_decode -> two_opt (optional) -> verify_tour -> optimality_gap.
+All in NumPy, on the CPU (one instance at a time).
 """
 
 import numpy as np
@@ -11,14 +11,14 @@ from tsp_gnn.data import distance_matrix, is_valid_tour, tour_length
 
 
 def _to_numpy(a):
-    """Aceita tensores do PyTorch (também na GPU) ou arrays e devolve um array NumPy."""
+    """Accept PyTorch tensors (also on the GPU) or arrays and return a NumPy array."""
     return a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else np.asarray(a)
 
 
 def edge_heatmap(edge_index, probs, n):
-    """Matriz simétrica (n, n) de probabilidades + máscara dos pares que estão no grafo.
+    """Symmetric (n, n) probability matrix + mask of the pairs that are in the graph.
 
-    Cada par do grafo tem duas previsões (i->j e j->i); usamos a média das duas.
+    Each pair in the graph has two predictions (i->j and j->i); we use their average.
     """
     src, dst = _to_numpy(edge_index)
     heat = np.zeros((n, n))
@@ -29,55 +29,55 @@ def edge_heatmap(edge_index, probs, n):
 
 
 def greedy_decode(heatmap, in_graph, coords):
-    """Constrói um tour aceitando arestas por ordem de preferência.
+    """Build a tour by accepting edges in order of preference.
 
-    Ordem das candidatas: primeiro as do grafo (probabilidade decrescente, desempate
-    pela mais curta); depois todos os pares fora do grafo (distância crescente), para
-    garantir que sai sempre um tour completo.
-    Uma aresta (i, j) é aceite se i e j têm grau < 2 e estão em fragmentos diferentes.
+    Candidate order: first the graph edges (decreasing probability, ties broken by the
+    shortest); then all pairs outside the graph (increasing distance), to guarantee
+    that a complete tour always comes out.
+    An edge (i, j) is accepted if i and j have degree < 2 and are in different fragments.
     """
     n = len(coords)
     dist = distance_matrix(coords)
-    i, j = np.triu_indices(n, k=1)               # todos os pares i < j
+    i, j = np.triu_indices(n, k=1)               # all pairs i < j
     g = in_graph[i, j]
 
-    gi, gj = i[g], j[g]                           # pares do grafo
-    order_g = np.lexsort((dist[gi, gj], -heatmap[gi, gj]))  # chave principal: -prob
-    oi, oj = i[~g], j[~g]                         # pares fora do grafo
+    gi, gj = i[g], j[g]                           # pairs in the graph
+    order_g = np.lexsort((dist[gi, gj], -heatmap[gi, gj]))  # primary key: -prob
+    oi, oj = i[~g], j[~g]                         # pairs outside the graph
     order_o = np.argsort(dist[oi, oj], kind="stable")
     candidates = np.concatenate([np.stack([gi[order_g], gj[order_g]], axis=1),
                                  np.stack([oi[order_o], oj[order_o]], axis=1)])
 
-    # Union-find: parent[c] aponta para outra cidade do mesmo fragmento; a raiz identifica-o.
+    # Union-find: parent[c] points to another city of the same fragment; the root identifies it.
     parent = list(range(n))
 
     def find(c):
         while parent[c] != c:
-            parent[c] = parent[parent[c]]         # compressão de caminho (acelera)
+            parent[c] = parent[parent[c]]         # path compression (speeds it up)
             c = parent[c]
         return c
 
     degree = np.zeros(n, dtype=int)
-    adj = [[] for _ in range(n)]                  # vizinhos de cada cidade no tour
+    adj = [[] for _ in range(n)]                  # neighbours of each city in the tour
     num_edges = 0
     for a, b in candidates.tolist():
         if degree[a] >= 2 or degree[b] >= 2:
-            continue                              # uma cidade só tem 2 vizinhos no tour
+            continue                              # a city has only 2 neighbours in the tour
         root_a, root_b = find(a), find(b)
         if root_a == root_b:
-            continue                              # fecharia um subciclo
-        parent[root_a] = root_b                   # junta os dois fragmentos
+            continue                              # would close a subtour
+        parent[root_a] = root_b                   # merge the two fragments
         degree[a] += 1; degree[b] += 1
         adj[a].append(b); adj[b].append(a)
         num_edges += 1
         if num_edges == n - 1:
-            break                                 # já é um caminho que passa por todas
+            break                                 # already a path through all cities
 
-    # A n-ésima aresta fecha o ciclo: liga as duas pontas (grau 1) do caminho.
+    # The n-th edge closes the cycle: it links the two ends (degree 1) of the path.
     a, b = np.where(degree == 1)[0]
     adj[a].append(b); adj[b].append(a)
 
-    # Converter as arestas numa ordem de visita, a partir da cidade 0.
+    # Turn the edges into a visiting order, starting from city 0.
     tour, prev, cur = [0], -1, 0
     for _ in range(n - 1):
         nxt = adj[cur][0] if adj[cur][0] != prev else adj[cur][1]
@@ -87,9 +87,9 @@ def greedy_decode(heatmap, in_graph, coords):
 
 
 def two_opt(coords, tour):
-    """Melhora o tour com 2-opt até não haver nenhuma troca que o encurte.
+    """Improve the tour with 2-opt until no swap shortens it.
 
-    Trocar as arestas (a,b) e (c,d) por (a,c) e (b,d) equivale a inverter o troço b..c.
+    Replacing edges (a,b) and (c,d) with (a,c) and (b,d) is the same as reversing the segment b..c.
     """
     dist = distance_matrix(coords)
     t = np.array(tour)
@@ -98,46 +98,46 @@ def two_opt(coords, tour):
     while improved:
         improved = False
         for i in range(n - 2):
-            # j percorre as arestas não adjacentes a (t[i], t[i+1]);
-            # com i = 0, a última aresta (t[n-1], t[0]) é adjacente e fica de fora.
+            # j runs over the edges not adjacent to (t[i], t[i+1]);
+            # with i = 0, the last edge (t[n-1], t[0]) is adjacent and is left out.
             js = np.arange(i + 2, n if i > 0 else n - 1)
             a, b = t[i], t[i + 1]
             c, d = t[js], t[(js + 1) % n]
-            gain = dist[a, c] + dist[b, d] - dist[a, b] - dist[c, d]  # variação do comprimento
+            gain = dist[a, c] + dist[b, d] - dist[a, b] - dist[c, d]  # change in length
             k = np.argmin(gain)
-            if gain[k] < -1e-9:                   # tolerância contra erros de arredondamento
+            if gain[k] < -1e-9:                   # tolerance against rounding errors
                 j = js[k]
                 t[i + 1:j + 1] = t[i + 1:j + 1][::-1]
                 improved = True
-    return t                                      # t[0] nunca se move: continua a começar em 0
+    return t                                      # t[0] never moves: it still starts at 0
 
 
 def verify_tour(tour, n):
-    """Lança ValueError a explicar o problema se o tour não visitar cada cidade uma vez."""
+    """Raise a ValueError explaining the problem if the tour does not visit each city once."""
     if not is_valid_tour(tour, n):
         tour = np.asarray(tour)
         missing = sorted(set(range(n)) - set(tour.tolist()))
         repeated = sorted({c for c in tour.tolist() if (tour == c).sum() > 1})
-        raise ValueError(f"tour inválido: tamanho {len(tour)} (esperado {n}), "
-                         f"em falta {missing}, repetidas {repeated}")
+        raise ValueError(f"invalid tour: length {len(tour)} (expected {n}), "
+                         f"missing {missing}, repeated {repeated}")
     return tour
 
 
 def optimality_gap(length, opt_len):
-    """Gap de otimalidade em %: quanto o tour é mais comprido do que o do LKH."""
+    """Optimality gap in %: how much longer the tour is than the LKH tour."""
     return 100.0 * (length / opt_len - 1.0)
 
 
 def tour_edges(tour):
-    """Conjunto das arestas não dirigidas do tour, como pares (menor, maior)."""
+    """Set of the undirected edges of the tour, as (smaller, larger) pairs."""
     tour = np.asarray(tour)
     return {(min(a, b), max(a, b)) for a, b in zip(tour.tolist(), np.roll(tour, -1).tolist())}
 
 
 def decode(data, probs, use_2opt=True):
-    """Decodifica um grafo (Data) com as probabilidades das suas arestas.
+    """Decode one graph (Data) given the probabilities of its edges.
 
-    Devolve um dicionário com o tour, o seu comprimento e o gap face ao LKH (opt_len).
+    Returns a dictionary with the tour, its length and the gap to LKH (opt_len).
     """
     coords = _to_numpy(data.x).astype(np.float64)
     n = len(coords)

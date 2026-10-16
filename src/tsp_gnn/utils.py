@@ -1,4 +1,4 @@
-"""Utilitários partilhados: seed, informação do git e limite de memória da GPU."""
+"""Shared utilities: seed, git information and GPU memory limit."""
 
 import random
 import subprocess
@@ -8,7 +8,7 @@ import torch
 
 
 def set_seed(seed):
-    """Fixa a seed de todos os geradores aleatórios (random, NumPy, PyTorch CPU e GPU)."""
+    """Set the seed of every random generator (random, NumPy, PyTorch CPU and GPU)."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -16,7 +16,7 @@ def set_seed(seed):
 
 
 def git_info():
-    """Commit atual e se há alterações por gravar (para saber que código gerou os resultados)."""
+    """Current commit and whether there are uncommitted changes (to know which code produced the results)."""
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "status", "--porcelain"],
@@ -25,12 +25,12 @@ def git_info():
 
 
 def limit_gpu_memory(device, max_gib=5.5):
-    """Limita o alocador do PyTorch a `max_gib` GiB nesta GPU (partilhada).
+    """Limit the PyTorch allocator to `max_gib` GiB on this (shared) GPU.
 
-    O contexto do CUDA ocupa ainda algumas centenas de MB fora deste limite:
-    com 5,5 GiB o processo fica abaixo de 6 GiB no total. Devolve a fração usada.
+    The CUDA context still takes a few hundred MB outside this limit:
+    with 5.5 GiB the process stays below 6 GiB in total. Returns the fraction used.
     """
-    # set_per_process_memory_fraction exige um índice (cuda:0), não só "cuda"
+    # set_per_process_memory_fraction requires an index (cuda:0), not just "cuda"
     index = device.index if device.index is not None else torch.cuda.current_device()
     total = torch.cuda.get_device_properties(index).total_memory
     fraction = min(1.0, max_gib * 2**30 / total)

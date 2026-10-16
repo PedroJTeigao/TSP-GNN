@@ -1,6 +1,6 @@
-"""Avalia um modelo já treinado (best.pt) nos conjuntos de teste, sem voltar a treinar.
+"""Evaluate an already trained model (best.pt) on the test sets, without retraining.
 
-Exemplo:
+Example:
     python scripts/evaluate.py --run-dir results/runs/gated_seed0
 """
 
@@ -14,8 +14,8 @@ from tsp_gnn.train import evaluate_and_save
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Avaliação de uma EdgeGNN treinada.")
-    parser.add_argument("--run-dir", required=True, help="pasta com o best.pt")
+    parser = argparse.ArgumentParser(description="Evaluate a trained EdgeGNN.")
+    parser.add_argument("--run-dir", required=True, help="folder containing best.pt")
     parser.add_argument("--test", nargs="+", default=["data/tsp20_test.npz", "data/tsp50_test.npz"])
     args = parser.parse_args()
 
@@ -24,8 +24,8 @@ def main():
     cfg = checkpoint["config"]
     model = EdgeGNN(cfg["model"], cfg["hidden"], cfg["layers"]).to(device)
     model.load_state_dict(checkpoint["state_dict"])
-    print(f"{args.run_dir}: {cfg['model']}, melhor época {checkpoint['epoch']} "
-          f"(gap val {checkpoint['val_gap']:.2f}%)")
+    print(f"{args.run_dir}: {cfg['model']}, best epoch {checkpoint['epoch']} "
+          f"(val gap {checkpoint['val_gap']:.2f}%)")
     evaluate_and_save(model, checkpoint, args.test, args.run_dir)
 
 

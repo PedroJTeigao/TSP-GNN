@@ -1,4 +1,4 @@
-"""Testes rápidos para src/tsp_gnn/models.py.  Correr com: pytest tests/"""
+"""Quick tests for src/tsp_gnn/models.py.  Run with: pytest tests/"""
 
 import pytest
 import torch
@@ -36,20 +36,20 @@ def test_all_parameters_get_gradient(kind):
     loss = torch.nn.functional.binary_cross_entropy_with_logits(model(batch), batch.y)
     loss.backward()
     for name, p in model.named_parameters():
-        assert p.grad is not None, f"{name} não recebeu gradiente (não é usado no forward?)"
-        assert p.grad.abs().sum() > 0, f"{name} tem gradiente nulo"
+        assert p.grad is not None, f"{name} got no gradient (not used in forward?)"
+        assert p.grad.abs().sum() > 0, f"{name} has a zero gradient"
 
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_permutation_equivariance(kind):
-    # Renumerar as cidades não pode mudar o logit de nenhuma aresta.
+    # Renumbering the cities must not change the logit of any edge.
     torch.manual_seed(0)
     g = small_batch(num=1)[0]
-    model = EdgeGNN(kind).eval()                       # eval: BatchNorm não depende do batch
+    model = EdgeGNN(kind).eval()                       # eval: BatchNorm does not depend on the batch
 
-    perm = torch.randperm(g.num_nodes)                 # nova cidade k = antiga cidade perm[k]
+    perm = torch.randperm(g.num_nodes)                 # new city k = old city perm[k]
     inv = torch.empty_like(perm)
-    inv[perm] = torch.arange(g.num_nodes)              # antiga cidade v -> novo número inv[v]
+    inv[perm] = torch.arange(g.num_nodes)              # old city v -> new number inv[v]
     g_perm = Data(x=g.x[perm], edge_index=inv[g.edge_index], edge_attr=g.edge_attr)
 
     with torch.no_grad():

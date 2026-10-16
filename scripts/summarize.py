@@ -1,11 +1,11 @@
-"""Junta os resultados das baselines e de todas as corridas num relatório.
+"""Gather the results of the baselines and of all runs into one report.
 
-Lê results/baselines.json (+ _per_instance.npz) e results/runs/{gcn,gat,gated}_seed*/
-(eval.json, eval_per_instance.npz, history.json) e gera:
-    results/tabela.md                 tabelas (gap ± desvio-padrão entre seeds; comparações emparelhadas)
-    results/figs/curvas_val.{png,pdf}  gap de validação por época, uma linha por modelo
-    results/figs/gaps_por_metodo.{png,pdf}  gaps por método em TSP-20 e TSP-50, com barras de erro
-Exemplo:
+Reads results/baselines.json (+ _per_instance.npz) and results/runs/{gcn,gat,gated}_seed*/
+(eval.json, eval_per_instance.npz, history.json) and produces:
+    results/table.md                       tables (gap ± std across seeds; paired comparisons)
+    results/figs/val_curves.{png,pdf}      validation gap per epoch, one line per model
+    results/figs/gaps_by_method.{png,pdf}  gaps per method on TSP-20 and TSP-50, with error bars
+Example:
     python scripts/summarize.py
 """
 
@@ -17,37 +17,37 @@ import os
 import re
 
 import matplotlib
-matplotlib.use("Agg")  # sem janela: só gravar ficheiros
+matplotlib.use("Agg")  # no window: only save files
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import wilcoxon
 
 MODELS = {"gcn": "GCN", "gat": "GATv2", "gated": "Gated GCN"}
-BASELINES = {"greedy": "Guloso clássico", "christofides": "Christofides"}
+BASELINES = {"greedy": "Classical greedy", "christofides": "Christofides"}
 DATASETS = {"tsp20_test": "TSP-20", "tsp50_test": "TSP-50"}
-TIE_TOL = 1e-6   # diferença de gap (pontos %) abaixo da qual duas instâncias contam como empate
+TIE_TOL = 1e-6   # gap difference (% points) below which two instances count as a tie
 ALPHA = 0.05
 
-# Cores (paleta de referência, validadas para daltonismo). Cada cor tem um só significado:
-MODEL_COLORS = {"gcn": "#2a78d6", "gat": "#eb6834", "gated": "#1baf7a"}   # figura das curvas
-VARIANT_COLORS = {"greedy": "#6250d6", "greedy+2opt": "#eda100"}          # figura das barras
+# Colours (reference palette, validated for colour blindness). Each colour has a single meaning:
+MODEL_COLORS = {"gcn": "#2a78d6", "gat": "#eb6834", "gated": "#1baf7a"}   # curves figure
+VARIANT_COLORS = {"greedy": "#6250d6", "greedy+2opt": "#eda100"}          # bars figure
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
-# As duas comparações emparelhadas: (método do modelo, método da baseline, descrição)
-COMPARISONS = [("greedy+2opt", "greedy+2opt", "modelo + 2-opt vs. guloso + 2-opt"),
-               ("greedy", "greedy", "modelo sem 2-opt vs. guloso clássico sem 2-opt")]
+# The two paired comparisons: (model method, baseline method, description)
+COMPARISONS = [("greedy+2opt", "greedy+2opt", "model + 2-opt vs. greedy + 2-opt"),
+               ("greedy", "greedy", "model without 2-opt vs. classical greedy without 2-opt")]
 
 
-# ---------------------------------------------------------------- leitura
+# ---------------------------------------------------------------- loading
 
 def load_runs(runs_dir):
-    """Corridas {modelo: [corrida, ...]} ordenadas por seed. Ignora pastas como quick_*."""
+    """Runs {model: [run, ...]} sorted by seed. Ignores folders such as quick_*."""
     runs = {m: [] for m in MODELS}
     for path in sorted(glob.glob(os.path.join(runs_dir, "*"))):
         match = re.fullmatch(r"(gcn|gat|gated)_seed(\d+)", os.path.basename(path))
         files = ("eval.json", "history.json", "eval_per_instance.npz")
         if not match or not all(os.path.exists(os.path.join(path, f)) for f in files):
-            continue  # nome de outro tipo (ex.: quick_gcn) ou corrida ainda a decorrer
+            continue  # another kind of name (e.g. quick_gcn) or a run still in progress
         with open(os.path.join(path, "eval.json")) as f:
             ev = json.load(f)
         with open(os.path.join(path, "history.json")) as f:
@@ -62,25 +62,25 @@ def load_runs(runs_dir):
 
 
 def check_consistency(runs):
-    """Avisa se as corridas de um modelo diferem em algo além da seed. Devolve os commits usados."""
+    """Warn if the runs of a model differ in anything other than the seed. Returns the commits used."""
     commits = set()
     for m, rs in runs.items():
         configs = [{k: v for k, v in r["eval"]["meta"]["config"].items()
                     if k not in ("seed", "pos_weight")} for r in rs]
         if any(c != configs[0] for c in configs):
-            print(f"AVISO: as corridas de {m} têm configurações diferentes: {configs}")
+            print(f"WARNING: the runs of {m} have different configurations: {configs}")
         for r in rs:
             meta = r["eval"]["meta"]
-            commits.add(meta["train_git_commit"] + (" (com alterações por gravar)" if meta["git_dirty"] else ""))
+            commits.add(meta["train_git_commit"] + (" (uncommitted changes)" if meta["git_dirty"] else ""))
     if len(commits) > 1:
-        print(f"AVISO: as corridas vêm de commits diferentes: {sorted(commits)}")
+        print(f"WARNING: the runs come from different commits: {sorted(commits)}")
     return sorted(commits)
 
 
-# ---------------------------------------------------------------- estatística
+# ---------------------------------------------------------------- statistics
 
 def mean_std(values):
-    """'média ± desvio-padrão' entre seeds (só a média se houver uma seed)."""
+    """'mean ± std' across seeds (only the mean if there is a single seed)."""
     values = np.asarray(values, dtype=float)
     if len(values) < 2:
         return f"{values.mean():.2f}"
@@ -88,11 +88,11 @@ def mean_std(values):
 
 
 def paired_compare(model_gaps, base_gaps, tol=TIE_TOL):
-    """Compara dois métodos instância a instância (gaps em %; menor é melhor).
+    """Compare two methods instance by instance (gaps in %; lower is better).
 
-    Devolve as percentagens de instâncias em que o modelo é melhor/igual/pior, a média e a
-    mediana da diferença (modelo - baseline) e o p-valor do teste de Wilcoxon bilateral
-    (os empates exatos são descartados pelo teste; se todas forem empate, p = 1).
+    Returns the percentages of instances where the model is better/equal/worse, the mean and
+    median of the difference (model - baseline) and the p-value of the two-sided Wilcoxon test
+    (exact ties are dropped by the test; if everything is a tie, p = 1).
     """
     diff = np.asarray(model_gaps) - np.asarray(base_gaps)
     nonzero = np.abs(diff) > tol
@@ -102,17 +102,17 @@ def paired_compare(model_gaps, base_gaps, tol=TIE_TOL):
             "median_diff": float(np.median(diff)), "p": float(p)}
 
 
-# ---------------------------------------------------------------- tabelas
+# ---------------------------------------------------------------- tables
 
 def table_gaps(baselines, runs):
-    """Tabela 1: gap médio ± desvio-padrão entre seeds."""
+    """Table 1: mean gap ± std across seeds."""
     cols = [(d, m) for d in DATASETS for m in ("greedy", "greedy+2opt")]
-    head = "| Método | " + " | ".join(f"{DATASETS[d]} {'gulosa' if m == 'greedy' else '+ 2-opt'}"
-                                      for d, m in cols) + " | Seeds | Épocas escolhidas |"
+    head = "| Method | " + " | ".join(f"{DATASETS[d]} {'greedy' if m == 'greedy' else '+ 2-opt'}"
+                                      for d, m in cols) + " | Seeds | Selected epochs |"
     lines = [head, "|" + "---|" * (len(cols) + 3)]
     for key, name in BASELINES.items():
         cells = [f"{baselines[d][key if m == 'greedy' else key + '+2opt']['gap_mean']:.2f}" for d, m in cols]
-        lines.append(f"| {name} | " + " | ".join(cells) + " | — (determinístico) | — |")
+        lines.append(f"| {name} | " + " | ".join(cells) + " | — (deterministic) | — |")
     for key, name in MODELS.items():
         rs = runs[key]
         if not rs:
@@ -125,9 +125,9 @@ def table_gaps(baselines, runs):
 
 
 def table_paired(base_per_instance, runs, threshold):
-    """Tabela 2: comparações emparelhadas por instância (uma por seed, depois agregadas)."""
-    lines = ["| Comparação | Conjunto | Modelo | Melhor | Igual | Pior | Dif. média (pp) "
-             "| Dif. mediana (pp) | p máx. (seeds) | Conclusão |",
+    """Table 2: paired per-instance comparisons (one per seed, then aggregated)."""
+    lines = ["| Comparison | Dataset | Model | Better | Equal | Worse | Mean diff. (pp) "
+             "| Median diff. (pp) | max p (seeds) | Conclusion |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for model_method, base_method, desc in COMPARISONS:
         for d in DATASETS:
@@ -139,22 +139,22 @@ def table_paired(base_per_instance, runs, threshold):
                 avg = {k: np.mean([x[k] for x in res]) for k in res[0]}
                 p_max = max(x["p"] for x in res)
                 same_sign = len({np.sign(x["median_diff"]) for x in res}) == 1
-                # Direção pela mediana; se a mediana for 0 (muitos empates), pela média.
+                # Direction from the median; if the median is 0 (many ties), from the mean.
                 direction = avg["median_diff"] if avg["median_diff"] != 0 else avg["mean_diff"]
                 if p_max < threshold and same_sign:
-                    verdict = "**melhor**" if direction < 0 else "**pior**"
+                    verdict = "**better**" if direction < 0 else "**worse**"
                 else:
-                    verdict = "n.s."  # não significativo
+                    verdict = "n.s."  # not significant
                 lines.append(f"| {desc} | {DATASETS[d]} | {name} | {avg['better']:.1f}% | {avg['equal']:.1f}% "
                              f"| {avg['worse']:.1f}% | {avg['mean_diff']:+.2f} | {avg['median_diff']:+.2f} "
                              f"| {p_max:.1e} | {verdict} |")
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------- figuras
+# ---------------------------------------------------------------- figures
 
 def style_axes(ax):
-    """Eixos discretos: sem caixa em cima/direita, grelha horizontal clara."""
+    """Discreet axes: no box at the top/right, light horizontal grid."""
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     for side in ("left", "bottom"):
@@ -171,14 +171,14 @@ def save(fig, figs_dir, name):
 
 
 def plot_curves(runs, figs_dir):
-    """Gap de validação por época: média das seeds (linha), mín–máx (faixa), épocas escolhidas (pontos)."""
+    """Validation gap per epoch: mean over seeds (line), min–max (band), selected epochs (dots)."""
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
     ends = []
     for key, name in MODELS.items():
         rs = runs[key]
         if not rs:
             continue
-        gaps = np.array([[h["val_gap_greedy"] for h in r["history"]] for r in rs])  # (seeds, épocas)
+        gaps = np.array([[h["val_gap_greedy"] for h in r["history"]] for r in rs])  # (seeds, epochs)
         epochs = np.arange(1, gaps.shape[1] + 1)
         color = MODEL_COLORS[key]
         ax.fill_between(epochs, gaps.min(0), gaps.max(0), color=color, alpha=0.15, linewidth=0)
@@ -187,7 +187,7 @@ def plot_curves(runs, figs_dir):
         ax.scatter(*zip(*best), s=36, color=color, edgecolors="white", linewidths=1.5, zorder=3)
         ends.append([gaps.mean(0)[-1], name])
 
-    # Nomes na ponta das linhas (texto em tinta escura), afastados se estiverem muito próximos.
+    # Names at the end of the lines (dark ink text), pushed apart if they are too close.
     ends.sort()
     min_sep = 0.04 * (ax.get_ylim()[1] - ax.get_ylim()[0])
     for i in range(1, len(ends)):
@@ -198,16 +198,16 @@ def plot_curves(runs, figs_dir):
     style_axes(ax)
     ax.set_xlim(0.5, epochs[-1] + 2.8)
     ax.set_xticks([1, 5, 10, 15, 20])
-    ax.set_xlabel("Época", color=INK)
-    ax.set_ylabel("Gap de validação, gulosa sem 2-opt (%)", color=INK)
-    ax.set_title("Curvas de treino (TSP-20): média das seeds, faixa = mín–máx, ● = época escolhida",
+    ax.set_xlabel("Epoch", color=INK)
+    ax.set_ylabel("Validation gap, greedy without 2-opt (%)", color=INK)
+    ax.set_title("Training curves (TSP-20): mean over seeds, band = min–max, ● = selected epoch",
                  color=INK, fontsize=10, loc="left")
     ax.legend(frameon=False, fontsize=9, loc="upper right", bbox_to_anchor=(0.88, 1.0))
-    save(fig, figs_dir, "curvas_val")
+    save(fig, figs_dir, "val_curves")
 
 
 def plot_bars(baselines, runs, figs_dir):
-    """Gap médio por método, gulosa vs. + 2-opt, em TSP-20 e TSP-50 (mesmo eixo y)."""
+    """Mean gap per method, greedy vs. + 2-opt, on TSP-20 and TSP-50 (shared y axis)."""
     methods = [(k, n, None) for k, n in BASELINES.items()] + [(k, n, runs[k]) for k, n in MODELS.items() if runs[k]]
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), sharey=True)
     width = 0.38
@@ -216,7 +216,7 @@ def plot_bars(baselines, runs, figs_dir):
         for v_idx, variant in enumerate(("greedy", "greedy+2opt")):
             means, errs = [], []
             for key, _, rs in methods:
-                if rs is None:  # baseline: determinística, sem barra de erro
+                if rs is None:  # baseline: deterministic, no error bar
                     means.append(baselines[d][key if variant == "greedy" else key + "+2opt"]["gap_mean"])
                     errs.append(0.0)
                 else:
@@ -225,26 +225,26 @@ def plot_bars(baselines, runs, figs_dir):
                     errs.append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
             offset = (v_idx - 0.5) * width
             ax.bar(x + offset, means, width, color=VARIANT_COLORS[variant], edgecolor="white", linewidth=2,
-                   label="Gulosa" if variant == "greedy" else "Gulosa + 2-opt")
-            # Barras de erro só onde há variação entre seeds (as baselines não têm).
+                   label="Greedy" if variant == "greedy" else "Greedy + 2-opt")
+            # Error bars only where there is variation across seeds (the baselines have none).
             has_err = np.array(errs) > 0
             ax.errorbar((x + offset)[has_err], np.array(means)[has_err], yerr=np.array(errs)[has_err],
                         fmt="none", ecolor=INK, elinewidth=1, capsize=3)
         style_axes(ax)
-        ax.set_xticks(x, [n.replace(" ", "\n", 1) for _, n, _ in methods], fontsize=9)  # nomes em 2 linhas
+        ax.set_xticks(x, [n.replace(" ", "\n", 1) for _, n, _ in methods], fontsize=9)  # names on 2 lines
         ax.set_title(DATASETS[d], color=INK, fontsize=11, loc="left")
-    axes[0].set_ylabel("Gap face ao LKH (%)", color=INK)
-    axes[0].legend(frameon=False, fontsize=9, loc="upper right")  # no TSP-20 há espaço livre em cima
-    fig.suptitle("Gap médio por método (teste). Barras de erro: desvio-padrão entre seeds; "
-                 "baselines são determinísticas", color=INK, fontsize=10, x=0.01, ha="left")
+    axes[0].set_ylabel("Gap to LKH (%)", color=INK)
+    axes[0].legend(frameon=False, fontsize=9, loc="upper right")  # TSP-20 has free space at the top
+    fig.suptitle("Mean gap per method (test). Error bars: std across seeds; "
+                 "baselines are deterministic", color=INK, fontsize=10, x=0.01, ha="left")
     fig.tight_layout()
-    save(fig, figs_dir, "gaps_por_metodo")
+    save(fig, figs_dir, "gaps_by_method")
 
 
 # ---------------------------------------------------------------- main
 
 def main():
-    parser = argparse.ArgumentParser(description="Relatório: tabelas e figuras dos resultados.")
+    parser = argparse.ArgumentParser(description="Report: tables and figures of the results.")
     parser.add_argument("--results", default="results")
     args = parser.parse_args()
 
@@ -256,38 +256,38 @@ def main():
     commits = check_consistency(runs)
 
     n_tests = len(COMPARISONS) * len(DATASETS) * sum(1 for m in MODELS if runs[m])
-    threshold = ALPHA / n_tests  # correção de Bonferroni para os testes todos
+    threshold = ALPHA / n_tests  # Bonferroni correction over all the tests
 
     report = "\n".join([
-        "# Resultados da fase 1",
+        "# Phase 1 results",
         "",
-        f"Gerado por `scripts/summarize.py` em {datetime.date.today().isoformat()}. "
-        f"Commits do treino: {', '.join(commits)}; baselines: {baselines['meta']['git_commit']}.",
+        f"Generated by `scripts/summarize.py` on {datetime.date.today().isoformat()}. "
+        f"Training commits: {', '.join(commits)}; baselines: {baselines['meta']['git_commit']}.",
         "",
-        "## Tabela 1 — gap médio face ao LKH (%)",
+        "## Table 1 — mean gap to LKH (%)",
         "",
-        "Modelos: média ± desvio-padrão **entre seeds** (variação de corrida para corrida). "
-        "Baselines: determinísticas. Treino em TSP-20; TSP-50 mede a generalização.",
+        "Models: mean ± std **across seeds** (run-to-run variation). "
+        "Baselines: deterministic. Trained on TSP-20; TSP-50 measures generalization.",
         "",
         table_gaps(baselines, runs),
         "",
-        "## Tabela 2 — comparações emparelhadas por instância",
+        "## Table 2 — paired per-instance comparisons",
         "",
-        f"Para cada seed, compara-se o gap de cada instância com o da baseline; a tabela mostra as médias "
-        f"entre seeds. *Igual* = diferença ≤ {TIE_TOL:g} pp. Dif. = modelo − baseline (negativo = modelo melhor). "
-        f"Teste de Wilcoxon bilateral (empates descartados); *p máx.* é o maior p-valor entre as seeds. "
-        f"Conclusão significativa só se p máx. < {threshold:.2e} (Bonferroni: {ALPHA}/{n_tests} testes) "
-        f"e o sinal da mediana for o mesmo em todas as seeds.",
+        f"For each seed, the gap of each instance is compared with the baseline's; the table shows the means "
+        f"across seeds. *Equal* = difference ≤ {TIE_TOL:g} pp. Diff. = model − baseline (negative = model better). "
+        f"Two-sided Wilcoxon test (ties dropped); *max p* is the largest p-value across seeds. "
+        f"A conclusion is significant only if max p < {threshold:.2e} (Bonferroni: {ALPHA}/{n_tests} tests) "
+        f"and the sign of the median is the same in every seed.",
         "",
         table_paired(base_per_instance, runs, threshold),
         "",
-        "## Figuras",
+        "## Figures",
         "",
-        "- `figs/curvas_val.png` — gap de validação por época",
-        "- `figs/gaps_por_metodo.png` — gap por método em TSP-20 e TSP-50",
+        "- `figs/val_curves.png` — validation gap per epoch",
+        "- `figs/gaps_by_method.png` — gap per method on TSP-20 and TSP-50",
         "",
     ])
-    with open(os.path.join(args.results, "tabela.md"), "w") as f:
+    with open(os.path.join(args.results, "table.md"), "w") as f:
         f.write(report)
 
     figs_dir = os.path.join(args.results, "figs")
@@ -296,8 +296,8 @@ def main():
     plot_bars(baselines, runs, figs_dir)
 
     print(report)
-    print(f"corridas: { {m: [r['seed'] for r in rs] for m, rs in runs.items()} }")
-    print(f"gravado: {args.results}/tabela.md e {figs_dir}/curvas_val.(png|pdf), gaps_por_metodo.(png|pdf)")
+    print(f"runs: { {m: [r['seed'] for r in rs] for m, rs in runs.items()} }")
+    print(f"saved: {args.results}/table.md and {figs_dir}/val_curves.(png|pdf), gaps_by_method.(png|pdf)")
 
 
 if __name__ == "__main__":

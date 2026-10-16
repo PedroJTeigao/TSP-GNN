@@ -2,7 +2,7 @@
 
 Este guia explica, em linguagem simples, tudo o que foi feito na fase 1: o problema, os
 métodos, as decisões e os resultados. Serve para estudar e para preparar a apresentação.
-Em cada secção indica-se **onde está no código** (📁). Os números vêm de `results/tabela.md`
+Em cada secção indica-se **onde está no código** (📁). Os números vêm de `results/table.md`
 e de `README.md`.
 
 ---
@@ -362,11 +362,11 @@ significativo nas três corridas.
 5. **Curvas de treino:** o GCN estagna logo após a época 2 (as épocas escolhidas — 13, 2, 5 —
    são sobretudo ruído); o GATv2 e o Gated ainda estão a melhorar na época 20.
 
-![Curvas de treino](figs/curvas_val.png)
+![Curvas de treino](figs/val_curves.png)
 
-![Gap por método](figs/gaps_por_metodo.png)
+![Gap por método](figs/gaps_by_method.png)
 
-📁 `results/tabela.md`, `scripts/summarize.py`
+📁 `results/table.md`, `scripts/summarize.py`
 
 ---
 

@@ -1,4 +1,4 @@
-"""Testes rápidos para src/tsp_gnn/decode.py.  Correr com: pytest tests/"""
+"""Quick tests for src/tsp_gnn/decode.py.  Run with: pytest tests/"""
 
 import numpy as np
 import pytest
@@ -19,14 +19,14 @@ def make_graph(seed, n=20):
 
 
 def test_heatmap_is_symmetric_average():
-    edge_index = torch.tensor([[0, 1], [1, 0]])        # aresta 0-1 nos dois sentidos
+    edge_index = torch.tensor([[0, 1], [1, 0]])        # edge 0-1 in both directions
     heat, in_graph = edge_heatmap(edge_index, torch.tensor([0.2, 0.6]), 3)
     assert np.isclose(heat[0, 1], 0.4) and np.isclose(heat[1, 0], 0.4)
     assert in_graph[0, 1] and in_graph[1, 0] and not in_graph[0, 2]
 
 
 def test_greedy_with_true_labels_recovers_lkh():
-    coords, tour, g = make_graph(seed=0)               # instância com cobertura total
+    coords, tour, g = make_graph(seed=0)               # instance with full coverage
     assert g.y.sum() == 2 * 20
     heat, in_graph = edge_heatmap(g.edge_index, g.y, 20)
     assert tour_edges(greedy_decode(heat, in_graph, coords)) == tour_edges(tour)
@@ -42,8 +42,8 @@ def test_greedy_always_gives_valid_tour(kind):
 
 
 def test_greedy_fallback_with_sparse_graph():
-    # Com k=3 faltam várias arestas do tour no grafo: a gulosa tem de usar pares fora
-    # do k-NN. Mesmo com os rótulos verdadeiros, o tour tem de ser válido e gap >= 0.
+    # With k=3 several tour edges are missing from the graph: greedy has to use pairs outside
+    # the k-NN. Even with the true labels, the tour must be valid and gap >= 0.
     max_missing = 0
     for seed in range(5):
         coords = generate_instances(num=1, n=20, seed=seed)[0]
@@ -56,11 +56,11 @@ def test_greedy_fallback_with_sparse_graph():
         assert is_valid_tour(greedy, 20)
         assert optimality_gap(tour_length(coords, greedy), opt) >= -1e-9
         assert tour_length(coords, two_opt(coords, greedy)) <= tour_length(coords, greedy) + 1e-12
-    assert max_missing >= 2   # garante que o caso "várias arestas em falta" foi mesmo testado
+    assert max_missing >= 2   # makes sure the "several missing edges" case was really tested
 
 
 def test_two_opt_uncrosses_square():
-    # 0-2-1-3 usa as duas diagonais (comprimento 2 + 2√2); o ótimo é o perímetro (4).
+    # 0-2-1-3 uses both diagonals (length 2 + 2√2); the optimum is the perimeter (4).
     improved = two_opt(SQUARE, [0, 2, 1, 3])
     assert np.isclose(tour_length(SQUARE, improved), 4.0)
     assert improved[0] == 0
@@ -76,11 +76,11 @@ def test_two_opt_never_worse():
 
 
 def test_verify_tour_rejects_bad_tours():
-    verify_tour(np.array([0, 2, 1, 3]), 4)             # válido: não lança erro
+    verify_tour(np.array([0, 2, 1, 3]), 4)             # valid: does not raise
     with pytest.raises(ValueError):
-        verify_tour(np.array([0, 1, 1, 3]), 4)         # cidade repetida (e 2 em falta)
+        verify_tour(np.array([0, 1, 1, 3]), 4)         # repeated city (and 2 missing)
     with pytest.raises(ValueError):
-        verify_tour(np.array([0, 1, 2]), 4)            # tamanho errado
+        verify_tour(np.array([0, 1, 2]), 4)            # wrong length
 
 
 def test_optimality_gap():
@@ -91,4 +91,4 @@ def test_optimality_gap():
 def test_decode_end_to_end_true_labels():
     _, _, g = make_graph(seed=0)
     result = decode(g, g.y)
-    assert abs(result["gap"]) < 1e-4                    # x está em float32: tolerância pequena
+    assert abs(result["gap"]) < 1e-4                    # x is float32: small tolerance

@@ -1,1 +1,1 @@
-"""tsp_gnn: código reutilizável da fase 1 (GNN supervisionada para o TSP)."""
+"""tsp_gnn: reusable code for phase 1 (supervised GNN for the TSP)."""
