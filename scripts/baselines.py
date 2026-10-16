@@ -10,7 +10,6 @@ import argparse
 import datetime
 import json
 import os
-import subprocess
 import time
 from multiprocessing import Pool
 
@@ -19,6 +18,7 @@ import numpy as np
 from tsp_gnn.baselines import christofides_tour, greedy_distance_tour
 from tsp_gnn.data import load_dataset, tour_length
 from tsp_gnn.decode import optimality_gap, two_opt, verify_tour
+from tsp_gnn.utils import git_info
 
 MAX_PROCS = 8  # servidor partilhado: no máximo 8 processos
 METHODS = ["greedy", "greedy+2opt", "christofides", "christofides+2opt"]
@@ -42,15 +42,6 @@ def run_instance(args):
         out[name + "+2opt"] = (optimality_gap(tour_length(coords, improved), opt_len),
                                1000 * (t_build + t_2opt))
     return out
-
-
-def git_info():
-    """Commit atual e se há alterações por gravar (para saber que código gerou os resultados)."""
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
-    dirty = bool(subprocess.run(["git", "status", "--porcelain"],
-                                capture_output=True, text=True).stdout.strip())
-    return commit, dirty
 
 
 def main():
