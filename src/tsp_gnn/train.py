@@ -15,6 +15,7 @@ from torch_geometric.loader import DataLoader
 
 from tsp_gnn.decode import decode
 from tsp_gnn.graph import load_graphs
+from tsp_gnn.models import with_batch_stats
 from tsp_gnn.utils import git_info
 
 
@@ -80,14 +81,14 @@ def decode_all(graphs, probs, use_2opt):
     return gaps, time.perf_counter() - start
 
 
-def evaluate_model(model, datasets):
+def evaluate_model(model, datasets, batch_size=256):
     """Evaluate the model on several datasets ({name: graphs}).
 
     Returns (summary per dataset and method, per-instance gaps).
     """
     summary, per_instance = {}, {}
     for name, graphs in datasets.items():
-        probs, t_inf = predict_probs(model, graphs)
+        probs, t_inf = predict_probs(model, graphs, batch_size)
         opt_len = np.array([float(g.opt_len) for g in graphs])
         entry = {"n": graphs[0].num_nodes, "num": len(graphs), "lkh_mean_len": float(opt_len.mean()),
                  "inference_ms_per_inst": 1000 * t_inf / len(graphs)}
@@ -105,20 +106,31 @@ def evaluate_model(model, datasets):
     return summary, per_instance
 
 
-def evaluate_and_save(model, checkpoint, test_paths, run_dir):
-    """Evaluate the model on the test sets and save eval.json + eval_per_instance.npz."""
+def evaluate_and_save(model, checkpoint, test_paths, run_dir, k_frac=None, batch_size=256,
+                      bn_batch_stats=False):
+    """Evaluate the model on the test sets and save eval.json + eval_per_instance.npz.
+
+    By default the graphs are built as in training (the checkpoint's k, k_frac and edge_norm).
+    k_frac overrides the graph size used at evaluation; bn_batch_stats evaluates a copy of the
+    model whose BatchNorms use the statistics of each batch (see models.with_batch_stats).
+    """
     cfg = checkpoint["config"]
     edge_norm = cfg.get("edge_norm", "none")  # phase 1 checkpoints have no edge_norm: they used "none"
-    datasets = {os.path.splitext(os.path.basename(p))[0]: load_graphs(p, cfg["k"], edge_norm)
+    k_frac = k_frac if k_frac is not None else cfg.get("k_frac")
+    datasets = {os.path.splitext(os.path.basename(p))[0]: load_graphs(p, cfg["k"], edge_norm, k_frac)
                 for p in test_paths}
-    summary, per_instance = evaluate_model(model, datasets)
+    if bn_batch_stats:
+        model = with_batch_stats(model)
+    summary, per_instance = evaluate_model(model, datasets, batch_size)
 
     commit, dirty = git_info()
     result = {"meta": {"git_commit": commit, "git_dirty": dirty,
                        "date": datetime.date.today().isoformat(),
                        "train_git_commit": checkpoint["git_commit"],
                        "config": checkpoint["config"],
-                       "best_epoch": checkpoint["epoch"], "best_val_gap": checkpoint["val_gap"]},
+                       "best_epoch": checkpoint["epoch"], "best_val_gap": checkpoint["val_gap"],
+                       "eval_options": {"k": cfg["k"], "k_frac": k_frac, "edge_norm": edge_norm,
+                                        "bn_batch_stats": bn_batch_stats, "batch_size": batch_size}},
               **summary}
     with open(os.path.join(run_dir, "eval.json"), "w") as f:
         json.dump(result, f, indent=2)

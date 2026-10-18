@@ -21,6 +21,17 @@ from tsp_gnn.data import load_dataset
 EDGE_NORMS = ("none", "knn_mean", "sqrt_n")
 
 
+def resolve_k(n, k=10, k_frac=None):
+    """Number of neighbours: fixed `k` (phase 1), or round(k_frac × n) if k_frac is given.
+
+    With k_frac = 0.5 each city sees half of the others, as with k=10 on TSP-20:
+    k = 10 on TSP-20, 25 on TSP-50, 50 on TSP-100. Never more than n-1.
+    """
+    if k_frac is None:
+        return min(k, n - 1)
+    return min(n - 1, round(k_frac * n))
+
+
 def knn_edges(pos, k=10):
     """Edges of the k-NN graph of `pos` (n, 2), in both directions and without duplicates. Shape: (2, E)."""
     n = pos.size(0)
@@ -57,10 +68,10 @@ def normalize_edges(edge_attr, n, edge_norm="none"):
     raise ValueError(f"unknown edge_norm: {edge_norm!r} (use one of {EDGE_NORMS})")
 
 
-def instance_to_data(coords, tour, length, k=10, edge_norm="none"):
+def instance_to_data(coords, tour, length, k=10, edge_norm="none", k_frac=None):
     """Build the Data object of one instance (coordinates, LKH tour and its length)."""
     pos = torch.as_tensor(coords, dtype=torch.float32)
-    edge_index = knn_edges(pos, k)
+    edge_index = knn_edges(pos, resolve_k(pos.size(0), k, k_frac))
     src, dst = edge_index
     edge_attr = (pos[src] - pos[dst]).norm(dim=1, keepdim=True)  # length of each edge
     edge_attr = normalize_edges(edge_attr, pos.size(0), edge_norm)
@@ -73,8 +84,8 @@ def instance_to_data(coords, tour, length, k=10, edge_norm="none"):
     )
 
 
-def load_graphs(path, k=10, edge_norm="none"):
+def load_graphs(path, k=10, edge_norm="none", k_frac=None):
     """Read an .npz from data.py and return the list of graphs (built in memory)."""
     d = load_dataset(path)
-    return [instance_to_data(c, t, l, k, edge_norm)
+    return [instance_to_data(c, t, l, k, edge_norm, k_frac)
             for c, t, l in zip(d["coords"], d["tours"], d["lengths"])]

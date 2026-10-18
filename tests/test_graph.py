@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from tsp_gnn.data import generate_instances, solve_lkh, tour_length
-from tsp_gnn.graph import instance_to_data, knn_edges, normalize_edges, tour_labels
+from tsp_gnn.graph import instance_to_data, knn_edges, normalize_edges, resolve_k, tour_labels
 
 SQUARE = torch.tensor([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=torch.float32)
 
@@ -91,3 +91,29 @@ def test_edge_norm_knn_mean_and_sqrt_n(n):
 def test_edge_norm_unknown_raises():
     with pytest.raises(ValueError):
         normalize_edges(torch.ones(3, 1), 3, "mean")
+
+
+
+# ---------------------------------------------------------------- k_frac (phase 2)
+
+def test_resolve_k():
+    assert [resolve_k(n) for n in (5, 20, 50, 100)] == [4, 10, 10, 10]        # default: fixed k=10
+    assert [resolve_k(n, k_frac=0.5) for n in (20, 50, 100)] == [10, 25, 50]
+    assert resolve_k(20, k=3, k_frac=0.5) == 10                               # k_frac wins over k
+    assert resolve_k(10, k_frac=1.0) == 9                                     # never more than n-1
+
+
+def test_k_frac_half_on_tsp20_is_phase1_graph():
+    coords = generate_instances(num=1, n=20, seed=3)[0]
+    tour = solve_lkh(coords)
+    g10 = instance_to_data(coords, tour, 1.0)                     # phase 1: k = 10
+    gfrac = instance_to_data(coords, tour, 1.0, k_frac=0.5)       # k = round(0.5 × 20) = 10
+    for key in ("edge_index", "edge_attr", "y"):
+        assert torch.equal(g10[key], gfrac[key])
+
+
+def test_k_frac_grows_graph_on_tsp50():
+    coords = generate_instances(num=1, n=50, seed=3)[0]
+    g = instance_to_data(coords, np.arange(50), 1.0, k_frac=0.5)
+    out_degree = torch.bincount(g.edge_index[0], minlength=50)
+    assert (out_degree >= 25).all()                               # each city keeps its 25 nearest
