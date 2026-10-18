@@ -26,3 +26,11 @@
 ## Repositório
 - GitHub: https://github.com/PedroJTeigao/TSP-GNN (branch main)
 - O /scratch não tem backup: fazer commit e push no fim de cada sessão.
+
+## Fase 2
+- Fase 1 congelada na tag git `phase1-final`.
+- Objetivo: testar se normalizar as distâncias das arestas corrige a falha de
+  generalização TSP-20 → TSP-50.
+- Hipótese: em TSP-50 as distâncias entre vizinhos são ~0,58× as de TSP-20
+  (≈ √(20/50)), por isso o modelo treinado em TSP-20 vê no teste uma escala de
+  distâncias que nunca viu no treino.
