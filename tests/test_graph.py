@@ -1,10 +1,11 @@
 """Quick tests for src/tsp_gnn/graph.py.  Run with: pytest tests/"""
 
 import numpy as np
+import pytest
 import torch
 
 from tsp_gnn.data import generate_instances, solve_lkh, tour_length
-from tsp_gnn.graph import instance_to_data, knn_edges, tour_labels
+from tsp_gnn.graph import instance_to_data, knn_edges, normalize_edges, tour_labels
 
 SQUARE = torch.tensor([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=torch.float32)
 
@@ -48,3 +49,45 @@ def test_random_graph_properties():
     covered = sum((a, b) in edge_set(g.edge_index) for a, b in tour_edges)
     assert g.y.sum() == 2 * covered
     assert torch.isclose(g.opt_len, torch.tensor([tour_length(coords, tour)]))
+
+
+# ---------------------------------------------------------------- edge_norm (phase 2)
+
+def phase1_data(coords, tour, k=10):
+    """The graph exactly as phase 1 built it (the code before edge_norm existed)."""
+    pos = torch.as_tensor(coords, dtype=torch.float32)
+    edge_index = knn_edges(pos, k)
+    src, dst = edge_index
+    return edge_index, (pos[src] - pos[dst]).norm(dim=1, keepdim=True), tour_labels(edge_index, tour, len(pos))
+
+
+@pytest.mark.parametrize("n", [20, 50])
+def test_edge_norm_none_is_phase1(n):
+    coords = generate_instances(num=1, n=n, seed=1)[0]
+    tour = solve_lkh(coords)
+    edge_index, edge_attr, y = phase1_data(coords, tour)
+    for g in (instance_to_data(coords, tour, 1.0), instance_to_data(coords, tour, 1.0, edge_norm="none")):
+        assert torch.equal(g.edge_index, edge_index)    # bit-for-bit, not just close
+        assert torch.equal(g.edge_attr, edge_attr)
+        assert torch.equal(g.y, y)
+
+
+@pytest.mark.parametrize("n", [20, 50, 100])
+def test_edge_norm_knn_mean_and_sqrt_n(n):
+    coords = generate_instances(num=1, n=n, seed=2)[0]
+    tour = np.arange(n)                                 # any valid tour: only edge_attr matters here
+    edge_index, edge_attr, y = phase1_data(coords, tour)
+
+    g = instance_to_data(coords, tour, 1.0, edge_norm="knn_mean")
+    assert torch.isclose(g.edge_attr.mean(), torch.tensor(1.0), atol=1e-6)   # mean edge length = 1
+    assert torch.allclose(g.edge_attr, edge_attr / edge_attr.mean())
+    assert torch.equal(g.edge_index, edge_index) and torch.equal(g.y, y)     # only edge_attr changes
+
+    g = instance_to_data(coords, tour, 1.0, edge_norm="sqrt_n")
+    assert torch.allclose(g.edge_attr, edge_attr * np.sqrt(n))
+    assert torch.equal(g.edge_index, edge_index) and torch.equal(g.y, y)
+
+
+def test_edge_norm_unknown_raises():
+    with pytest.raises(ValueError):
+        normalize_edges(torch.ones(3, 1), 3, "mean")

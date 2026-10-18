@@ -3,6 +3,7 @@
 Examples:
     python scripts/train_model.py --model gated
     python scripts/train_model.py --model gcn --epochs 2 --num-train 1000 --run-name quick_gcn
+    python scripts/train_model.py --model gated --edge-norm knn_mean --run-name gated_knnmean_seed0
 """
 
 import argparse
@@ -13,7 +14,7 @@ import time
 import torch
 from torch_geometric.loader import DataLoader
 
-from tsp_gnn.graph import load_graphs
+from tsp_gnn.graph import EDGE_NORMS, load_graphs
 from tsp_gnn.models import EdgeGNN, count_parameters
 from tsp_gnn.train import (compute_pos_weight, decode_all, eval_loss, evaluate_and_save,
                            predict_probs, train_epoch)
@@ -29,6 +30,8 @@ def main():
     parser.add_argument("--hidden", type=int, default=64)
     parser.add_argument("--layers", type=int, default=6)
     parser.add_argument("--k", type=int, default=10, help="neighbours in the k-NN graph")
+    parser.add_argument("--edge-norm", choices=EDGE_NORMS, default="none",
+                        help="rescaling of the edge lengths (none = phase 1)")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-train", type=int, default=None, help="use only the first N instances")
     parser.add_argument("--train", default="data/tsp20_train.npz")
@@ -44,8 +47,8 @@ def main():
     fraction = limit_gpu_memory(device)
 
     # Data: training and validation only. The test sets are loaded only after training ends.
-    train_graphs = load_graphs(args.train, args.k)[:args.num_train]
-    val_graphs = load_graphs(args.val, args.k)
+    train_graphs = load_graphs(args.train, args.k, args.edge_norm)[:args.num_train]
+    val_graphs = load_graphs(args.val, args.k, args.edge_norm)
     pos_weight = compute_pos_weight(train_graphs)
     loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=device))
     shuffle_gen = torch.Generator().manual_seed(args.seed)  # reproducible batch order
@@ -58,9 +61,10 @@ def main():
 
     commit, dirty = git_info()
     config = {"model": args.model, "hidden": args.hidden, "layers": args.layers, "k": args.k,
+              "edge_norm": args.edge_norm,
               "epochs": args.epochs, "batch_size": args.batch_size, "lr": args.lr, "seed": args.seed,
               "num_train": len(train_graphs), "pos_weight": pos_weight}
-    print(f"{run_dir}  |  {count_parameters(model):,} parameters  |  train {len(train_graphs)}, "
+    print(f"{run_dir}  |  edge_norm {args.edge_norm}  |  {count_parameters(model):,} parameters  |  train {len(train_graphs)}, "
           f"validation {len(val_graphs)}  |  pos_weight {pos_weight:.3f}  |  GPU ≤ {fraction:.2f} of memory")
     print(f"{'epoch':>5}{'lr':>10}{'train loss':>14}{'val loss':>11}{'val gap':>9}{'time':>8}{'GPU peak':>10}")
 

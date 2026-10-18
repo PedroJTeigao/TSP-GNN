@@ -107,7 +107,9 @@ def evaluate_model(model, datasets):
 
 def evaluate_and_save(model, checkpoint, test_paths, run_dir):
     """Evaluate the model on the test sets and save eval.json + eval_per_instance.npz."""
-    datasets = {os.path.splitext(os.path.basename(p))[0]: load_graphs(p, checkpoint["config"]["k"])
+    cfg = checkpoint["config"]
+    edge_norm = cfg.get("edge_norm", "none")  # phase 1 checkpoints have no edge_norm: they used "none"
+    datasets = {os.path.splitext(os.path.basename(p))[0]: load_graphs(p, cfg["k"], edge_norm)
                 for p in test_paths}
     summary, per_instance = evaluate_model(model, datasets)
 

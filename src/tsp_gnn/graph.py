@@ -3,7 +3,7 @@
 Each instance becomes a torch_geometric.data.Data with:
     x          (n, 2)  city coordinates
     edge_index (2, E)  edges of the k-NN graph, in both directions
-    edge_attr  (E, 1)  length of each edge
+    edge_attr  (E, 1)  length of each edge (optionally rescaled, see EDGE_NORMS)
     y          (E,)    1.0 if the edge belongs to the LKH tour, 0.0 otherwise
     opt_len    (1,)    length of the LKH tour (to compute the gap later)
 """
@@ -12,6 +12,13 @@ import torch
 from torch_geometric.data import Data
 
 from tsp_gnn.data import load_dataset
+
+# How edge_attr is rescaled. In uniform [0,1]² instances the typical neighbour distance
+# shrinks like 1/√n, so a model trained on TSP-20 sees smaller distances on TSP-50.
+#   none      raw lengths (phase 1)
+#   knn_mean  divide by the mean edge length of the instance's k-NN graph (mean becomes 1)
+#   sqrt_n    multiply by √n (fixed rescaling, does not look at the data)
+EDGE_NORMS = ("none", "knn_mean", "sqrt_n")
 
 
 def knn_edges(pos, k=10):
@@ -39,12 +46,24 @@ def tour_labels(edge_index, tour, n):
     return in_tour[edge_index[0], edge_index[1]].float()
 
 
-def instance_to_data(coords, tour, length, k=10):
+def normalize_edges(edge_attr, n, edge_norm="none"):
+    """Rescale the edge lengths according to `edge_norm` (one of EDGE_NORMS)."""
+    if edge_norm == "none":
+        return edge_attr                       # untouched: bit-for-bit the phase 1 values
+    if edge_norm == "knn_mean":
+        return edge_attr / edge_attr.mean()
+    if edge_norm == "sqrt_n":
+        return edge_attr * n ** 0.5
+    raise ValueError(f"unknown edge_norm: {edge_norm!r} (use one of {EDGE_NORMS})")
+
+
+def instance_to_data(coords, tour, length, k=10, edge_norm="none"):
     """Build the Data object of one instance (coordinates, LKH tour and its length)."""
     pos = torch.as_tensor(coords, dtype=torch.float32)
     edge_index = knn_edges(pos, k)
     src, dst = edge_index
     edge_attr = (pos[src] - pos[dst]).norm(dim=1, keepdim=True)  # length of each edge
+    edge_attr = normalize_edges(edge_attr, pos.size(0), edge_norm)
     return Data(
         x=pos,
         edge_index=edge_index,
@@ -54,7 +73,8 @@ def instance_to_data(coords, tour, length, k=10):
     )
 
 
-def load_graphs(path, k=10):
+def load_graphs(path, k=10, edge_norm="none"):
     """Read an .npz from data.py and return the list of graphs (built in memory)."""
     d = load_dataset(path)
-    return [instance_to_data(c, t, l, k) for c, t, l in zip(d["coords"], d["tours"], d["lengths"])]
+    return [instance_to_data(c, t, l, k, edge_norm)
+            for c, t, l in zip(d["coords"], d["tours"], d["lengths"])]
