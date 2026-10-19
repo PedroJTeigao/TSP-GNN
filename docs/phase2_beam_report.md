@@ -48,11 +48,11 @@ Models: mean ± std across the 3 seeds. Baselines are deterministic (no beam).
 
 ## Table 3 — beam 100 + 2-opt against greedy + 2-opt and the baselines + 2-opt
 
-Diff. = beam 100 + 2-opt − reference (negative = beam search is better). Bonferroni: 0.05/54 tests, threshold 9.26e-04. *Equal* = difference ≤ 1e-06 pp. Two-sided Wilcoxon test per seed (ties dropped); *max p* is the largest p-value across the 3 seeds; significant only if max p is below the Bonferroni threshold and the median has the same sign in every seed. The baselines are deterministic, so every seed is compared with the same baseline gaps.
+Diff. = beam 100 + 2-opt − reference (negative = beam search is better). Bonferroni: 0.05/54 tests, threshold 9.26e-04. *Equal* = difference ≤ 1e-06 pp. Two-sided Wilcoxon test per seed (ties dropped); *max p* is the largest p-value across the 3 seeds; significant only if max p is below the Bonferroni threshold and the medians of the seeds agree in sign; a seed whose median is zero (|median| ≤ 1e-06 pp, i.e. more than half of the instances tie) is neutral, and if every median is zero the direction comes from the mean difference. The baselines are deterministic, so every seed is compared with the same baseline gaps.
 
 | Configuration | Model | Dataset | Reference | Beam gap | Ref. gap | Better | Equal | Worse | Mean diff. (pp) | Median diff. (pp) | max p (seeds) | Conclusion |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| phase1 | GCN | TSP-20 | own greedy + 2-opt | 0.51 | 1.79 | 46.4% | 44.7% | 9.0% | -1.28 | -0.00 | 2.8e-50 | n.s. |
+| phase1 | GCN | TSP-20 | own greedy + 2-opt | 0.51 | 1.79 | 46.4% | 44.7% | 9.0% | -1.28 | -0.00 | 2.8e-50 | **better** |
 | phase1 | GCN | TSP-20 | Classical greedy + 2-opt | 0.51 | 2.02 | 64.3% | 9.0% | 26.8% | -1.51 | -0.06 | 3.7e-50 | **better** |
 | phase1 | GCN | TSP-20 | Christofides + 2-opt | 0.51 | 2.16 | 68.2% | 7.3% | 24.5% | -1.64 | -0.59 | 1.2e-60 | **better** |
 | phase1 | GCN | TSP-50 | own greedy + 2-opt | 1.88 | 3.32 | 65.5% | 11.5% | 23.1% | -1.44 | -0.98 | 6.9e-25 | **better** |
@@ -61,7 +61,7 @@ Diff. = beam 100 + 2-opt − reference (negative = beam search is better). Bonfe
 | phase1 | GCN | TSP-100 | own greedy + 2-opt | 2.84 | 4.07 | 71.5% | 1.3% | 27.3% | -1.24 | -1.11 | 1.2e-25 | **better** |
 | phase1 | GCN | TSP-100 | Classical greedy + 2-opt | 2.84 | 4.29 | 73.3% | 0.0% | 26.7% | -1.46 | -1.33 | 5.5e-26 | **better** |
 | phase1 | GCN | TSP-100 | Christofides + 2-opt | 2.84 | 4.40 | 77.7% | 0.0% | 22.3% | -1.56 | -1.63 | 6.3e-35 | **better** |
-| phase1 | GATv2 | TSP-20 | own greedy + 2-opt | 0.16 | 1.23 | 44.3% | 52.4% | 3.2% | -1.07 | -0.00 | 5.5e-67 | n.s. |
+| phase1 | GATv2 | TSP-20 | own greedy + 2-opt | 0.16 | 1.23 | 44.3% | 52.4% | 3.2% | -1.07 | -0.00 | 5.5e-67 | **better** |
 | phase1 | GATv2 | TSP-20 | Classical greedy + 2-opt | 0.16 | 2.02 | 71.1% | 9.2% | 19.7% | -1.86 | -0.48 | 3.5e-91 | **better** |
 | phase1 | GATv2 | TSP-20 | Christofides + 2-opt | 0.16 | 2.16 | 75.2% | 7.6% | 17.3% | -2.00 | -1.06 | 7.9e-103 | **better** |
 | phase1 | GATv2 | TSP-50 | own greedy + 2-opt | 2.36 | 3.99 | 65.3% | 11.3% | 23.4% | -1.63 | -1.11 | 1.7e-27 | **better** |

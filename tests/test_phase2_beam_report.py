@@ -67,3 +67,19 @@ def test_beam_report_missing_run(tmp_path):
     text = report.build_report(str(tmp_path))
     assert "ln_last/gcn_layernorm_ckpt_seed1" in text
     assert "| GCN | ln_last | missing |" in text
+
+
+def test_zero_median_is_neutral():
+    rng = np.random.default_rng(0)
+    ref = [rng.random(NUM) for _ in range(3)]
+    # Seeds 0 and 2: 60% ties (median 0, up to rounding), the rest better. Seed 1: all better.
+    tie_then_better = [np.where(np.arange(NUM) < 0.6 * NUM, r - 1e-14, r - 1) for r in ref]
+    a = [tie_then_better[0], ref[1] - 1, tie_then_better[2]]
+    assert report.paired(a, ref, 0.05)["verdict"] == "better"
+    # Neutral seeds do not count: if the only non-zero median says "worse", the verdict is "worse".
+    a[1] = ref[1] + 1
+    assert report.paired(a, ref, 0.05)["verdict"] == "worse"
+    # Two non-zero medians with opposite signs: no verdict.
+    assert report.paired([ref[0] - 1, ref[1] + 1, tie_then_better[2]], ref, 0.05)["verdict"] == "n.s."
+    # Every median zero: the direction comes from the mean difference.
+    assert report.paired(tie_then_better, ref, 0.05)["verdict"] == "better"

@@ -72,6 +72,25 @@ def fmt(values):
     return f"{np.mean(values):.2f} ± {np.std(values, ddof=1):.2f}" if len(values) > 1 else f"{values[0]:.2f}"
 
 
+def paired(a_list, ref_list, threshold):
+    """Paired comparison a − ref, one per seed (max p over seeds, as in phase 1), with neutral zero medians.
+
+    Unlike phase2_checks_report.paired, a seed whose median difference is zero (|median| ≤ TIE_TOL: more
+    than half of the instances tie) is neutral: it neither supports nor contradicts a direction. The other
+    seeds' medians must agree in sign; if every median is zero, the direction comes from the mean difference.
+    """
+    res = [summarize.paired_compare(a, r) for a, r in zip(a_list, ref_list)]
+    avg = {k: float(np.mean([x[k] for x in res])) for k in res[0]}
+    p_max = max(x["p"] for x in res)
+    signs = {np.sign(x["median_diff"]) for x in res if abs(x["median_diff"]) > TIE_TOL}
+    if len(signs) > 1:
+        verdict = "n.s."                                  # seeds disagree on the direction
+    else:
+        direction = signs.pop() if signs else np.sign(avg["mean_diff"])
+        verdict = ("better" if direction < 0 else "worse") if p_max < threshold and direction != 0 else "n.s."
+    return {**avg, "p_max": p_max, "verdict": verdict}
+
+
 # ---------------------------------------------------------------- tables
 
 def table_gaps(data, baselines, with_2opt):
@@ -112,13 +131,14 @@ def table_tests(tests):
     lines = [f"Diff. = beam {WIDTHS[-1]} + 2-opt − reference (negative = beam search is better). "
              f"Bonferroni: {ALPHA}/{len(tests)} tests, threshold {threshold:.2e}. *Equal* = difference ≤ {TIE_TOL:g} pp. "
              "Two-sided Wilcoxon test per seed (ties dropped); *max p* is the largest p-value across the 3 seeds; "
-             "significant only if max p is below the Bonferroni threshold and the median has the same sign in every "
-             "seed. The baselines are deterministic, so every seed is compared with the same baseline gaps.", "",
+             "significant only if max p is below the Bonferroni threshold and the medians of the seeds agree in sign; "
+             f"a seed whose median is zero (|median| ≤ {TIE_TOL:g} pp, i.e. more than half of the instances tie) is "
+             "neutral, and if every median is zero the direction comes from the mean difference. The baselines are deterministic, so every seed is compared with the same baseline gaps.", "",
              "| Configuration | Model | Dataset | Reference | Beam gap | Ref. gap | " + checks.HEADER[0],
              "|---|---|---|---|---|---|" + checks.HEADER[1]]
     verdicts = []
     for c, m, d, lab, beam, ref in tests:
-        r = checks.paired(beam, ref, threshold)
+        r = paired(beam, ref, threshold)
         verdicts.append((c, m, d, lab, r))
         label = (f"{c} | {MODELS[m]} | {DATASETS[d]} | {lab} | {np.mean([b.mean() for b in beam]):.2f} | "
                  f"{np.mean([x.mean() for x in ref]):.2f}")
