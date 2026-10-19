@@ -5,8 +5,8 @@ import pytest
 import torch
 
 from tsp_gnn.data import generate_instances, is_valid_tour, solve_lkh, tour_length
-from tsp_gnn.decode import (decode, edge_heatmap, greedy_decode, optimality_gap, tour_edges,
-                            two_opt, verify_tour)
+from tsp_gnn.decode import (beam_search_decode, decode, edge_heatmap, greedy_decode, optimality_gap,
+                            tour_edges, two_opt, verify_tour)
 from tsp_gnn.graph import instance_to_data
 
 SQUARE = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
@@ -92,3 +92,51 @@ def test_decode_end_to_end_true_labels():
     _, _, g = make_graph(seed=0)
     result = decode(g, g.y)
     assert abs(result["gap"]) < 1e-4                    # x is float32: small tolerance
+
+
+def noisy_heatmap(seed, n, k):
+    """Heatmap of a fake, imperfect model: probability falls with distance, plus noise."""
+    coords = generate_instances(num=1, n=n, seed=seed)[0]
+    g = instance_to_data(coords, np.arange(n), 1.0, k=k)
+    torch.manual_seed(seed)
+    d = torch.norm(g.x[g.edge_index[0]] - g.x[g.edge_index[1]], dim=1)
+    probs = torch.sigmoid(-10 * d + 2 * torch.randn(len(d)))
+    heat, in_graph = edge_heatmap(g.edge_index, probs, n)
+    return coords, heat, in_graph
+
+
+@pytest.mark.parametrize("n, k", [(20, 10), (50, 25), (30, 3)])   # k=3: many pairs need the fallback
+def test_beam_width_1_is_greedy(n, k):
+    for seed in range(10):
+        coords, heat, in_graph = noisy_heatmap(seed, n, k)
+        assert np.array_equal(beam_search_decode(heat, in_graph, coords, 1),
+                              greedy_decode(heat, in_graph, coords))
+    # Ties everywhere (all probabilities 0): same tie-breaks as greedy.
+    heat = np.zeros_like(heat)
+    assert np.array_equal(beam_search_decode(heat, in_graph, coords, 1), greedy_decode(heat, in_graph, coords))
+
+
+@pytest.mark.parametrize("beam_width", [2, 10, 100])
+def test_beam_gives_valid_tours(beam_width):
+    for seed in range(5):
+        coords, heat, in_graph = noisy_heatmap(seed, 30, 5)
+        tour = beam_search_decode(heat, in_graph, coords, beam_width)
+        assert is_valid_tour(tour, 30) and tour[0] == 0
+
+
+def test_beam_shorter_on_average():
+    # Pure beam search does not guarantee a shorter tour on every instance (the greedy path can
+    # be pruned from the beam), so we check the mean over a small sample.
+    lengths = {1: [], 10: [], 100: []}
+    for seed in range(20):
+        coords, heat, in_graph = noisy_heatmap(seed, 30, 15)
+        for b in lengths:
+            lengths[b].append(tour_length(coords, beam_search_decode(heat, in_graph, coords, b)))
+    assert np.mean(lengths[10]) < np.mean(lengths[1])
+    assert np.mean(lengths[100]) <= np.mean(lengths[10])
+
+
+def test_beam_with_true_labels_recovers_lkh():
+    coords, tour, g = make_graph(seed=0)
+    heat, in_graph = edge_heatmap(g.edge_index, g.y, 20)
+    assert tour_edges(beam_search_decode(heat, in_graph, coords, 10)) == tour_edges(tour)
