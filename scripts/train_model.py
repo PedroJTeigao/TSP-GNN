@@ -42,6 +42,9 @@ def main():
     parser.add_argument("--val", default="data/tsp20_val.npz")
     parser.add_argument("--test", nargs="+", default=["data/tsp20_test.npz", "data/tsp50_test.npz"])
     parser.add_argument("--run-name", default=None, help="default: {model}_seed{seed}")
+    parser.add_argument("--extra-checkpoints", action="store_true",
+                        help="also save best_loss.pt (lowest val loss) and last.pt (last epoch); "
+                             "best.pt is always the best val gap and is the one evaluated at the end")
     args = parser.parse_args()
 
     run_dir = os.path.join("results", "runs", args.run_name or f"{args.model}_seed{args.seed}")
@@ -73,7 +76,7 @@ def main():
           f"validation {len(val_graphs)}  |  pos_weight {pos_weight:.3f}  |  GPU ≤ {fraction:.2f} of memory")
     print(f"{'epoch':>5}{'lr':>10}{'train loss':>14}{'val loss':>11}{'val gap':>9}{'time':>8}{'GPU peak':>10}")
 
-    history, best_gap = [], float("inf")
+    history, best_gap, best_loss = [], float("inf"), float("inf")
     for epoch in range(1, args.epochs + 1):
         start = time.time()
         torch.cuda.reset_peak_memory_stats(device)
@@ -89,11 +92,17 @@ def main():
         history.append({"epoch": epoch, "lr": lr, "train_loss": train_loss, "val_loss": val_loss,
                         "val_gap_greedy": val_gap, "seconds": elapsed, "peak_gpu_mb": peak_mb})
         is_best = val_gap < best_gap
+        state = {"state_dict": model.state_dict(), "config": config, "epoch": epoch,
+                 "val_gap": val_gap, "val_loss": val_loss, "git_commit": commit, "git_dirty": dirty}
         if is_best:  # model selection uses the validation set only
             best_gap = val_gap
-            torch.save({"state_dict": model.state_dict(), "config": config, "epoch": epoch,
-                        "val_gap": val_gap, "git_commit": commit, "git_dirty": dirty},
-                       os.path.join(run_dir, "best.pt"))
+            torch.save(state, os.path.join(run_dir, "best.pt"))
+        if args.extra_checkpoints:
+            if val_loss < best_loss:
+                best_loss = val_loss
+                torch.save(state, os.path.join(run_dir, "best_loss.pt"))
+            if epoch == args.epochs:
+                torch.save(state, os.path.join(run_dir, "last.pt"))
         print(f"{epoch:>5}{lr:>10.2e}{train_loss:>14.4f}{val_loss:>11.4f}{val_gap:>8.2f}%"
               f"{elapsed:>7.1f}s{peak_mb:>8.0f}MB{'  *' if is_best else ''}")
 

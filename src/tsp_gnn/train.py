@@ -129,6 +129,7 @@ def evaluate_and_save(model, checkpoint, test_paths, run_dir, k_frac=None, batch
                        "train_git_commit": checkpoint["git_commit"],
                        "config": checkpoint["config"],
                        "best_epoch": checkpoint["epoch"], "best_val_gap": checkpoint["val_gap"],
+                       "val_loss": checkpoint.get("val_loss"),  # absent in checkpoints older than phase 2 step 1
                        "eval_options": {"k": cfg["k"], "k_frac": k_frac, "edge_norm": edge_norm,
                                         "bn_batch_stats": bn_batch_stats, "batch_size": batch_size}},
               **summary}
