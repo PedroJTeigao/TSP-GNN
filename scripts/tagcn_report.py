@@ -7,6 +7,7 @@ Reads (TAGCN, K = 2 and 3, seeds 0, 1, 2; written by scripts/run_tagcn.sh):
     results/runs/tagcn_k<K>_layernorm_seed<s>/last_kfrac05/   LayerNorm retraining, last.pt, k = 0.5 n
     results/runs/tagcn_k<K>_ckpt_seed<s>/                 BatchNorm rerun with last.pt (scripts/run_tagcn_ckpt.sh)
         last_beam/                                        last.pt: greedy / beam 100 (± 2-opt), TSP-20/50/100, k = 0.5 n
+        last_k10/                                         last.pt: greedy (± 2-opt), TSP-20/50, k = 10 (phase 1 graphs)
 and the earlier results of the other three models with the same protocol (nothing is recomputed):
     results/runs/<m>_seed<s>/, results/phase2_batch2/kfrac05/<m>_seed<s>/,
     results/phase2_checks/ln/last_kfrac05/<m>_layernorm_ckpt_seed<s>/, results/phase2_beam/phase1/<m>_seed<s>/.
@@ -91,10 +92,10 @@ def load_all(results):
 
 
 def load_last(results):
-    """{arch: [per seed: (eval.json, per-instance) of last.pt or None]} and the same for the rerun's best.pt."""
-    last = {a: [batch2.load_folder(os.path.join(results, CKPT_RUN(a, s), "last_beam")) for s in SEEDS] for a in TAGCN}
-    rerun = {a: [batch2.load_folder(os.path.join(results, CKPT_RUN(a, s))) for s in SEEDS] for a in TAGCN}
-    return last, rerun
+    """last.pt with k = 0.5 n, last.pt with k = 10 and the rerun's best.pt: {arch: [per seed: loaded or None]}."""
+    load = lambda sub: {a: [batch2.load_folder(os.path.join(results, CKPT_RUN(a, s), sub)) for s in SEEDS]
+                        for a in TAGCN}
+    return load("last_beam"), load("last_k10"), load("")
 
 
 def complete(runs, d):
@@ -154,7 +155,7 @@ MAIN_COLS = [("phase1", "tsp20_test", "Phase 1 TSP-20"), ("phase1", "tsp50_test"
              ("beam", "tsp50_test", "B=100 TSP-50"), ("beam", "tsp100_test", "B=100 TSP-100")]
 
 
-def table_main(data, baselines, last=None):
+def table_main(data, baselines, last=None, last_k10=None):
     """Mean gap over the 3 seeds: 'without 2-opt / with 2-opt' in each cell; bold = best model in the column.
 
     last: TAGCN last.pt rows (BatchNorm reruns), shown below and not counted for the bold.
@@ -182,11 +183,12 @@ def table_main(data, baselines, last=None):
     for a in TAGCN if last else ():
         cells = []
         for blk, d, _ in MAIN_COLS:
-            if blk == "ln" or (blk == "phase1" and d != "tsp20_test"):
-                cells.append("—")      # last.pt was only evaluated with k = 0.5 n (= k = 10 on TSP-20)
+            if blk == "ln":
+                cells.append("—")      # LayerNorm is a different training
                 continue
             pre = "beam100" if blk == "beam" else "greedy"
-            cells.append(" / ".join(cell(gaps(last[a], d, pre + suffix)) for suffix in ("", "+2opt")))
+            src = last_k10[a] if blk == "phase1" else last[a]   # phase 1 columns: k = 10 graphs
+            cells.append(" / ".join(cell(gaps(src, d, pre + suffix)) for suffix in ("", "+2opt")))
         lines.append(f"| {ARCHS[a][0]} (last.pt, rerun) | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
@@ -297,6 +299,24 @@ def phase1_tests(data, base):
     return tests
 
 
+def kfrac_greedy_tests(data, last, base):
+    """Greedy (no 2-opt) with k = 0.5 n vs. Christofides without 2-opt, TSP-50 and TSP-100.
+
+    TAGCN K=2 / K=3 best.pt and last.pt (reruns) and GCN best.pt.
+    """
+    models = [(f"{ARCHS[a][0]} best.pt", data["kfrac"][a]) for a in TAGCN]
+    models += [(f"{ARCHS[a][0]} last.pt", last[a]) for a in TAGCN]
+    models += [("GCN best.pt", data["kfrac"]["gcn"])]
+    tests = []
+    for name, runs in models:
+        for d in ("tsp50_test", "tsp100_test"):
+            key = f"{d}__christofides"
+            if complete(runs, d) and key in base:
+                tests.append((name, d, "greedy", "Christofides", [r[1][f"{d}__greedy"] for r in runs],
+                              [base[key]] * len(runs)))
+    return tests
+
+
 def beam_tests(data, base):
     """TAGCN beam 100 + 2-opt vs. each baseline + 2-opt, TSP-20/50/100."""
     tests = []
@@ -315,13 +335,13 @@ def table_tests(tests):
     """Rows of one family of tests, Bonferroni over the family. Returns (markdown, verdicts)."""
     threshold = ALPHA / max(len(tests), 1)
     lines = [f"Bonferroni: {ALPHA}/{len(tests)} tests, threshold {threshold:.2e}.", "",
-             "| Model | Dataset | TAGCN decoder | Reference | TAGCN gap | Ref. gap | " + checks.HEADER[0],
+             "| Model | Dataset | Decoder | Reference | Model gap | Ref. gap | " + checks.HEADER[0],
              "|---|---|---|---|---|---|" + checks.HEADER[1]]
     verdicts = []
     for a, d, meth, lab, x, ref in tests:
         r = beam_report.paired(x, ref, threshold)
         verdicts.append((a, d, meth, lab, r))
-        label = (f"{ARCHS[a][0]} | {DATASETS[d]} | {meth} | {lab} | {np.mean([v.mean() for v in x]):.2f} | "
+        label = (f"{ARCHS.get(a, (a,))[0]} | {DATASETS[d]} | {meth} | {lab} | {np.mean([v.mean() for v in x]):.2f} | "
                  f"{np.mean([v.mean() for v in ref]):.2f}")
         lines.append(checks.row(label, r))
     return "\n".join(lines), verdicts
@@ -418,7 +438,8 @@ def build_report(results, figs_dir=None):
     baselines = batch2.load_baselines(results)
     base = checks.load_base_per_instance(results)
     histories = load_histories(results)
-    last, rerun = load_last(results)
+    last, last_k10, rerun = load_last(results)
+    t_kfrac, _ = table_tests(kfrac_greedy_tests(data, last, base))
     if figs_dir:
         plot_curves(histories, figs_dir)
     t1, _ = table_tests(phase1_tests(data, base))
@@ -428,6 +449,7 @@ def build_report(results, figs_dir=None):
     missing = [BLOCKS[b][3](a, s) for b in BLOCKS for a in TAGCN for s, r in zip(SEEDS, data[b][a]) if r is None]
     missing += [f"{CKPT_RUN(a, s)}/last_beam" for a in TAGCN for s, r in zip(SEEDS, last[a]) if r is None]
     missing += [CKPT_RUN(a, s) for a in TAGCN for s, r in zip(SEEDS, rerun[a]) if r is None]
+    missing += [f"{CKPT_RUN(a, s)}/last_k10" for a in TAGCN for s, r in zip(SEEDS, last_k10[a]) if r is None]
     lines = [
         "# TAGCN — fourth encoder, phase 1 and phase 2 protocol",
         "",
@@ -446,10 +468,10 @@ def build_report(results, figs_dir=None):
         "(25 on TSP-50, 50 on TSP-100). LayerNorm: retrained with LayerNorm, last epoch, k = 0.5 n. B=100: beam search "
         "of width 100 on the phase 1 checkpoints, k = 0.5 n; baseline cells there are the plain baselines. "
         "Bold = best model in that column and variant (best.pt rows only). *last.pt, rerun*: last epoch of the "
-        "BatchNorm reruns (Table 7); it was evaluated only with k = 0.5 n (identical to k = 10 on TSP-20), so the "
-        "phase 1 TSP-50 and LayerNorm cells are empty.",
+        "BatchNorm reruns (Table 7); its phase 1 columns use k = 10 graphs (`last_k10/`), the others k = 0.5 n; "
+        "LayerNorm is a different training, so those cells are empty.",
         "",
-        table_main(data, baselines, last),
+        table_main(data, baselines, last, last_k10),
         "",
         "## Table 2 — parameters",
         "",
@@ -483,6 +505,14 @@ def build_report(results, figs_dir=None):
         "`phase2_beam_report.md` (Table 3, Bonferroni over 54 tests there).",
         "",
         t2,
+        "",
+        "## Table 5b — greedy with k = 0.5 n against Christofides (no 2-opt)",
+        "",
+        "Diff. = model greedy − Christofides (negative = model better), no 2-opt on either side, k = 0.5 n test "
+        "graphs. TAGCN best.pt (first runs), TAGCN last.pt (BatchNorm reruns) and GCN best.pt "
+        "(`phase2_batch2/kfrac05/`). Bonferroni over this family only.",
+        "",
+        t_kfrac,
         "",
         "## Table 6 — consistency check: TAGCN greedy in the beam run vs. earlier evaluation of the same checkpoint",
         "",

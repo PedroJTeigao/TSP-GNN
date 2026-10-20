@@ -57,7 +57,9 @@ def fake_results(root, skip=()):
             for folder, ds, methods, meta in ((run, ("tsp20_test", "tsp50_test"), ("greedy", "greedy+2opt"),
                                                {"best_epoch": 5, "best_val_gap": 6.0}),
                                               (os.path.join(run, "last_beam"), report.DATASETS, report.LAST_METHODS,
-                                               {"epoch": 20})):
+                                               {"epoch": 20}),
+                                              (os.path.join(run, "last_k10"), ("tsp20_test", "tsp50_test"),
+                                               ("greedy", "greedy+2opt"), {"epoch": 20})):
                 os.makedirs(folder, exist_ok=True)
                 ev = {"meta": meta, **{d: {m: {"gap_mean": float((base_pi[f"{d}__greedy"] - 4).mean())}
                                            for m in methods} for d in ds}}
@@ -83,7 +85,8 @@ def test_tagcn_report(tmp_path):
     text = report.build_report(str(tmp_path), figs_dir=str(tmp_path / "figs"))
     assert os.path.exists(tmp_path / "figs" / "tagcn_curves.png")
     assert "0.05/16 tests" in text and "0.05/12 tests" in text   # 2 K × 2 datasets × 2 decoders × 2 baselines; beam 2 × 3 × 2
-    assert text.count("| **better** |") == 16 + 12 and "| **worse** |" not in text
+    assert "0.05/10 tests" in text                             # greedy k = 0.5 n vs. Christofides: 5 models × 2 datasets
+    assert text.count("| **better** |") == 16 + 12 + 10 and "| **worse** |" not in text
     assert "| TAGCN K=2 | 3 | 2 | 6 | 54,337 |" in text and "| TAGCN K=3 | 2 | 3 | 6 | 50,049 |" in text
     assert "| 600 | 0 | 0.00e+00 |" in text                     # consistency check: 3 seeds × 200, all identical
     assert "## Missing results\n\nNone." in text

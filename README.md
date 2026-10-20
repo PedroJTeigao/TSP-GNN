@@ -30,6 +30,12 @@ seeds; baselines: deterministic.
 | GCN | 8.53 ± 0.19 | 1.79 ± 0.06 | 15.91 ± 0.49 | 3.66 ± 0.07 | 13, 2, 5 |
 | GATv2 | 6.04 ± 0.22 | 1.23 ± 0.07 | 14.68 ± 1.02 | 4.07 ± 0.25 | 17, 7, 17 |
 | Gated GCN | **4.85 ± 0.20** | **0.90 ± 0.03** | 16.38 ± 0.80 | 4.78 ± 0.17 | 17, 20, 17 |
+| TAGCN K=2 | 7.03 ± 0.49 | 1.46 ± 0.04 | 16.40 ± 4.46 | 3.87 ± 0.87 | 1, 1, 18 |
+| TAGCN K=3 | 6.44 ± 0.25 | 1.43 ± 0.03 | 15.47 ± 0.06 | 3.66 ± 0.08 | 12, 1, 4 |
+| TAGCN K=2, last.pt | 7.53 ± 0.20 | 1.41 ± 0.12 | 20.18 ± 1.06 | 4.58 ± 0.15 | 20, 20, 20 |
+| TAGCN K=3, last.pt | 7.28 ± 0.12 | 1.46 ± 0.07 | 17.36 ± 0.98 | 4.16 ± 0.15 | 20, 20, 20 |
+
+*last.pt*: epoch 20 of reruns with the same seeds. Selection by validation gap is unstable for TAGCN (the gap is flat from epoch 1 and reruns pick different epochs), so the selection rule will be revised; details in [`docs/tagcn_report.md`](docs/tagcn_report.md).
 
 Paired per-instance comparisons (two-sided Wilcoxon test; significant if the largest p-value
 across the 3 seeds is < 0.05/12 ≈ 0.0042, Bonferroni correction for 12 tests):
