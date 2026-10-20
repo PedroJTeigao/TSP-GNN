@@ -27,7 +27,7 @@ from tsp_gnn.data import tour_length
 from tsp_gnn.decode import (beam_search_decode, edge_heatmap, greedy_decode, optimality_gap, two_opt,
                             verify_tour)
 from tsp_gnn.graph import load_graphs
-from tsp_gnn.models import EdgeGNN
+from tsp_gnn.models import build_model
 from tsp_gnn.train import predict_probs
 from tsp_gnn.utils import git_info, limit_gpu_memory
 
@@ -83,7 +83,7 @@ def main():
         limit_gpu_memory(device)  # shared GPU: same 5.5 GiB cap as training
     checkpoint = torch.load(os.path.join(args.run_dir, args.checkpoint), map_location=device)
     cfg = checkpoint["config"]
-    model = EdgeGNN(cfg["model"], cfg["hidden"], cfg["layers"], norm=cfg.get("norm", "batchnorm")).to(device)
+    model = build_model(cfg).to(device)
     model.load_state_dict(checkpoint["state_dict"])
     edge_norm = cfg.get("edge_norm", "none")
     k_frac = args.k_frac if args.k_frac is not None else cfg.get("k_frac")

@@ -5,6 +5,7 @@ Examples:
     python scripts/train_model.py --model gcn --epochs 2 --num-train 1000 --run-name quick_gcn
     python scripts/train_model.py --model gated --edge-norm knn_mean --run-name gated_knnmean_seed0
     python scripts/train_model.py --model gated --norm layernorm --run-name gated_layernorm_seed0
+    python scripts/train_model.py --model tagcn --tag-k 3 --run-name tagcn_k3_seed0   # 2 layers of 3 hops
 """
 
 import argparse
@@ -16,7 +17,7 @@ import torch
 from torch_geometric.loader import DataLoader
 
 from tsp_gnn.graph import EDGE_NORMS, load_graphs
-from tsp_gnn.models import NORMS, EdgeGNN, count_parameters
+from tsp_gnn.models import KINDS, NORMS, EdgeGNN, count_parameters, default_layers
 from tsp_gnn.train import (compute_pos_weight, decode_all, eval_loss, evaluate_and_save,
                            predict_probs, train_epoch)
 from tsp_gnn.utils import git_info, limit_gpu_memory, set_seed
@@ -24,12 +25,14 @@ from tsp_gnn.utils import git_info, limit_gpu_memory, set_seed
 
 def main():
     parser = argparse.ArgumentParser(description="Train an EdgeGNN for the TSP.")
-    parser.add_argument("--model", choices=["gcn", "gat", "gated"], required=True)
+    parser.add_argument("--model", choices=KINDS, required=True)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--hidden", type=int, default=64)
-    parser.add_argument("--layers", type=int, default=6)
+    parser.add_argument("--layers", type=int, default=None,
+                        help="default: 6 (TAGCN: round(6 / tag_k), i.e. about 6 hops of reach)")
+    parser.add_argument("--tag-k", type=int, default=2, help="TAGCN only: hops K of each layer's filter")
     parser.add_argument("--k", type=int, default=10, help="neighbours in the k-NN graph")
     parser.add_argument("--edge-norm", choices=EDGE_NORMS, default="none",
                         help="rescaling of the edge lengths (none = phase 1)")
@@ -46,6 +49,8 @@ def main():
                         help="also save best_loss.pt (lowest val loss) and last.pt (last epoch); "
                              "best.pt is always the best val gap and is the one evaluated at the end")
     args = parser.parse_args()
+    if args.layers is None:
+        args.layers = default_layers(args.model, args.tag_k)
 
     run_dir = os.path.join("results", "runs", args.run_name or f"{args.model}_seed{args.seed}")
     os.makedirs(run_dir, exist_ok=True)
@@ -62,17 +67,20 @@ def main():
     train_loader = DataLoader(train_graphs, batch_size=args.batch_size, shuffle=True, generator=shuffle_gen)
     val_loader = DataLoader(val_graphs, batch_size=256, shuffle=False)
 
-    model = EdgeGNN(args.model, args.hidden, args.layers, norm=args.norm).to(device)
+    model = EdgeGNN(args.model, args.hidden, args.layers, norm=args.norm, tag_k=args.tag_k).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     commit, dirty = git_info()
     config = {"model": args.model, "hidden": args.hidden, "layers": args.layers, "k": args.k,
+              **({"tag_k": args.tag_k} if args.model == "tagcn" else {}),
               "edge_norm": args.edge_norm, "k_frac": args.k_frac, "norm": args.norm,
               "train": args.train, "val": args.val,
               "epochs": args.epochs, "batch_size": args.batch_size, "lr": args.lr, "seed": args.seed,
-              "num_train": len(train_graphs), "pos_weight": pos_weight}
-    print(f"{run_dir}  |  edge_norm {args.edge_norm}, norm {args.norm}, k_frac {args.k_frac}  |  {count_parameters(model):,} parameters  |  train {len(train_graphs)}, "
+              "num_train": len(train_graphs), "pos_weight": pos_weight,
+              "num_parameters": count_parameters(model)}
+    tag = f", K {args.tag_k}" if args.model == "tagcn" else ""
+    print(f"{run_dir}  |  {args.model}{tag}, {args.layers} layers  |  edge_norm {args.edge_norm}, norm {args.norm}, k_frac {args.k_frac}  |  {config['num_parameters']:,} parameters  |  train {len(train_graphs)}, "
           f"validation {len(val_graphs)}  |  pos_weight {pos_weight:.3f}  |  GPU ≤ {fraction:.2f} of memory")
     print(f"{'epoch':>5}{'lr':>10}{'train loss':>14}{'val loss':>11}{'val gap':>9}{'time':>8}{'GPU peak':>10}")
 

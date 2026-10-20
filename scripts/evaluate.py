@@ -14,7 +14,7 @@ import os
 
 import torch
 
-from tsp_gnn.models import EdgeGNN
+from tsp_gnn.models import build_model
 from tsp_gnn.train import evaluate_and_save
 from tsp_gnn.utils import limit_gpu_memory
 
@@ -39,7 +39,7 @@ def main():
         limit_gpu_memory(device)  # shared GPU: same 5.5 GiB cap as training
     checkpoint = torch.load(os.path.join(args.run_dir, args.checkpoint), map_location=device)
     cfg = checkpoint["config"]
-    model = EdgeGNN(cfg["model"], cfg["hidden"], cfg["layers"], norm=cfg.get("norm", "batchnorm")).to(device)
+    model = build_model(cfg).to(device)
     model.load_state_dict(checkpoint["state_dict"])
     print(f"{args.run_dir}: {cfg['model']}, edge_norm {cfg.get('edge_norm', 'none')}, "
           f"norm {cfg.get('norm', 'batchnorm')}, {args.checkpoint}: epoch {checkpoint['epoch']} "

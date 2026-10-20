@@ -58,7 +58,7 @@ gnn-tsp/
 │   ├── graph.py            instance -> torch_geometric Data (k-NN graph, labels, opt_len)
 │   ├── decode.py           heatmap, greedy with union-find, 2-opt, verify_tour, gap
 │   ├── baselines.py        greedy by distance and Christofides (networkx)
-│   ├── models.py           EdgeGNN: GCN, GATv2, Gated GCN (hand-written layer)
+│   ├── models.py           EdgeGNN: GCN, GATv2, Gated GCN (hand-written layer), TAGCN
 │   ├── train.py            loss, epochs, per-graph prediction, evaluation
 │   └── utils.py            seed, git_info, GPU memory limit
 ├── scripts/                what is run from the command line
@@ -69,7 +69,7 @@ gnn-tsp/
 │   ├── train_model.py      training + final test evaluation
 │   ├── evaluate.py         re-evaluates a best.pt without retraining
 │   └── summarize.py        tables, paired tests and figures
-├── tests/                  pytest (38 tests, ~13 s)
+├── tests/                  pytest (100 tests, ~45 s)
 ├── docs/                   study guide and figures (in git)
 ├── data/                   datasets (not in git)
 └── results/                baselines, runs, tables, figures (not in git)
@@ -91,7 +91,7 @@ elkai 2.0.1, networkx 3.7, numpy 2.5.4, scipy 1.18.1, matplotlib 3.11.2, pytest 
 
 ```bash
 source env.sh
-pytest -q tests/                                   # 38 tests
+pytest -q tests/                                   # 100 tests
 
 # Step 1 — data (LKH, up to 8 processes; ~1.5 min in total)
 python scripts/make_dataset.py --n 20 --num 12000 --seed 1 --out data/tsp20_train.npz
@@ -136,9 +136,26 @@ re-checked value by value). New runs log in English.
 | Data | cities uniform in [0,1]²; training 12,000 × TSP-20 (seed 1), validation 500 × TSP-20 (seed 2), test 1,000 × TSP-20 (seed 3) and 500 × TSP-50 (seed 4) |
 | Labels | LKH tour via elkai (distances × 10⁶ rounded to integers); means 3.83–3.85 (TSP-20, in the 3 sets) and 5.68 (TSP-50), in line with the optimal values in the literature (3.83 / 5.70); LKH = exact optimum on 7-city instances (brute force, `tests/test_data.py`) |
 | Graph | k-NN with k=10, both directions; `edge_attr` = distance **without normalization** |
-| Models | `EdgeGNN(kind, hidden=64, layers=6)`: embeddings → 6 layers (residual + BatchNorm) → MLP([h_i, h_j, e_ij]) → one logit per edge. GATv2 with 4 heads × 16 dims. Parameters: GCN 42,625, GATv2 92,929, Gated 143,233 |
+| Models | `EdgeGNN(kind, hidden=64, layers=6)`: embeddings → 6 layers (residual + BatchNorm) → MLP([h_i, h_j, e_ij]) → one logit per edge. GATv2 with 4 heads × 16 dims. Parameters: GCN 42,625, GATv2 92,929, Gated 143,233 (see the model table below) |
 | Training | `BCEWithLogitsLoss(pos_weight = neg/pos ≈ 5.05)`, Adam lr 1e-3, cosine annealing, 20 epochs, batch 64; model selection **only** by the greedy gap on validation; GPU limited to 5.5 GiB (actual peak < 200 MB) |
 | Evaluation | greedy and greedy + 2-opt; every tour verified (`verify_tour`); gap = 100·(L/L_LKH − 1) |
+
+## Models
+
+All encoders share the input embeddings (coordinates 2→64, distance 1→64), the residual +
+normalization wrapper `h ← h + ReLU(Norm(conv(h)))` (Gated GCN has its own) and the edge head
+MLP([h_i, h_j, e_ij]); H = 64 and a reach of 6 hops for every model.
+
+| Model | `--model` | Layer | Layers × hops | Uses distances in the encoder | Parameters |
+|---|---|---|---|---|---|
+| GCN (Kipf & Welling 2017) | `gcn` | `GCNConv`: degree-normalized mean | 6 × 1 | no | 42,625 |
+| GATv2 (Brody et al. 2022) | `gat` | `GATv2Conv`, 4 heads × 16, attention with e_ij | 6 × 1 | yes | 92,929 |
+| Gated GCN (Joshi et al. 2019) | `gated` | hand-written, edge gates, updates e_ij | 6 × 1 | yes | 143,233 |
+| TAGCN, K=2 (Du et al. 2017) | `tagcn --tag-k 2` | `TAGConv`: Σ_{k=0..K} Â^k H W_k | 3 × 2 | no | 54,337 |
+| TAGCN, K=3 | `tagcn --tag-k 3` | `TAGConv` | 2 × 3 | no | 50,049 |
+
+TAGCN results (phase 1 and phase 2 protocol, next to the other three models):
+[`docs/tagcn_report.md`](docs/tagcn_report.md).
 
 ## Recorded decisions
 
@@ -193,6 +210,7 @@ re-checked value by value). New runs log in English.
 - Joshi, Laurent & Bresson (2019). *An Efficient Graph Convolutional Network Technique for the Travelling Salesman Problem.*
 - Bresson & Laurent (2017). *Residual Gated Graph ConvNets.*
 - Kipf & Welling (2017). *Semi-Supervised Classification with Graph Convolutional Networks.*
+- Du, Zhang, Wu, Moura & Kar (2017). *Topology Adaptive Graph Convolutional Networks* (TAGCN).
 - Brody, Alon & Yahav (2022). *How Attentive are Graph Attention Networks?* (GATv2)
 - Helsgaun (2000). *An Effective Implementation of the Lin–Kernighan Traveling Salesman Heuristic* (LKH).
 - Christofides (1976). *Worst-case analysis of a new heuristic for the travelling salesman problem.*

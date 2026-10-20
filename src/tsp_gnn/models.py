@@ -1,6 +1,6 @@
 """GNNs that predict, for each edge of the k-NN graph, whether it belongs to the tour.
 
-EdgeGNN(kind, norm) with kind in {'gcn', 'gat', 'gated'} and norm in {'batchnorm', 'layernorm'}:
+EdgeGNN(kind, norm) with kind in {'gcn', 'gat', 'gated', 'tagcn'} and norm in {'batchnorm', 'layernorm'}:
     embeddings (coordinates and distance) -> L encoder layers (residual + normalization)
     -> MLP head([h_i, h_j, e_ij]) -> one logit per edge.
 
@@ -14,10 +14,20 @@ from copy import deepcopy
 
 import torch
 from torch import nn
-from torch_geometric.nn import GATv2Conv, GCNConv
+from torch_geometric.nn import GATv2Conv, GCNConv, TAGConv
 from torch_geometric.utils import scatter
 
 NORMS = ("batchnorm", "layernorm")
+KINDS = ("gcn", "gat", "gated", "tagcn")
+
+
+def default_layers(kind, tag_k=2):
+    """Number of layers when none is given: 6 hops of reach for every model.
+
+    GCN, GATv2 and Gated GCN see 1 hop per layer (6 layers). A TAGCN layer sees K hops, so it gets
+    round(6 / K) layers: K=2 -> 3 layers, K=3 -> 2 layers.
+    """
+    return max(1, round(6 / max(tag_k, 1))) if kind == "tagcn" else 6
 
 
 def make_norm(norm, hidden):
@@ -61,12 +71,16 @@ class GatedGCNLayer(nn.Module):
 
 
 class EdgeGNN(nn.Module):
-    """Edge classifier with a GCN, GATv2 or Gated GCN encoder."""
+    """Edge classifier with a GCN, GATv2, Gated GCN or TAGCN encoder.
 
-    def __init__(self, kind, hidden=64, layers=6, heads=4, norm="batchnorm"):
+    tag_k (TAGCN only): number of hops K of each layer's polynomial filter.
+    """
+
+    def __init__(self, kind, hidden=64, layers=6, heads=4, norm="batchnorm", tag_k=2):
         super().__init__()
         self.kind = kind
         self.norm = norm
+        self.tag_k = tag_k
         self.node_embed = nn.Linear(2, hidden)             # coordinates -> h⁰
         self.edge_embed = nn.Linear(1, hidden)             # distance    -> e⁰
 
@@ -78,8 +92,11 @@ class EdgeGNN(nn.Module):
                 for _ in range(layers))
         elif kind == "gated":  # also updates one vector per edge
             self.convs = nn.ModuleList(GatedGCNLayer(hidden, norm=norm) for _ in range(layers))
+        elif kind == "tagcn":  # polynomial filter Σ_k Â^k H W_k (Du et al. 2017); does not use distances
+            # Â = D^-1/2 A D^-1/2 without self-loops (PyG's TAGConv default); k = 0 is the node itself.
+            self.convs = nn.ModuleList(TAGConv(hidden, hidden, K=tag_k) for _ in range(layers))
         else:
-            raise ValueError(f"unknown kind: {kind!r} (use 'gcn', 'gat' or 'gated')")
+            raise ValueError(f"unknown kind: {kind!r} (use one of {KINDS})")
         if kind != "gated":    # the Gated layer already has its own normalizations
             self.norms = nn.ModuleList(make_norm(norm, hidden) for _ in range(layers))
 
@@ -89,7 +106,8 @@ class EdgeGNN(nn.Module):
             nn.Linear(hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, 1))
 
-    def forward(self, data):
+    def encode(self, data):
+        """Node vectors h and edge vectors e after the encoder (before the head)."""
         edge_index = data.edge_index
         h = self.node_embed(data.x)
         e = self.edge_embed(data.edge_attr)
@@ -97,10 +115,20 @@ class EdgeGNN(nn.Module):
             if self.kind == "gated":
                 h, e = conv(h, e, edge_index)
             else:
-                out = conv(h, edge_index) if self.kind == "gcn" else conv(h, edge_index, e)
+                out = conv(h, edge_index, e) if self.kind == "gat" else conv(h, edge_index)
                 h = h + torch.relu(self.norms[layer_idx](out))  # residual + normalization
-        src, dst = edge_index
+        return h, e
+
+    def forward(self, data):
+        h, e = self.encode(data)
+        src, dst = data.edge_index
         return self.head(torch.cat([h[src], h[dst], e], dim=-1)).squeeze(-1)  # (E,)
+
+
+def build_model(cfg):
+    """EdgeGNN from a checkpoint's config (older checkpoints have no norm / tag_k: their defaults)."""
+    return EdgeGNN(cfg["model"], cfg["hidden"], cfg["layers"], norm=cfg.get("norm", "batchnorm"),
+                   tag_k=cfg.get("tag_k", 2))
 
 
 def count_parameters(model):
