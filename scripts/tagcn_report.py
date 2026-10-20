@@ -5,6 +5,8 @@ Reads (TAGCN, K = 2 and 3, seeds 0, 1, 2; written by scripts/run_tagcn.sh):
         kfrac05/                                          best.pt on TSP-50/100 with k = 0.5 n
         beam/                                             greedy / beam 10 / beam 100 (± 2-opt), TSP-20/50/100, k = 0.5 n
     results/runs/tagcn_k<K>_layernorm_seed<s>/last_kfrac05/   LayerNorm retraining, last.pt, k = 0.5 n
+    results/runs/tagcn_k<K>_ckpt_seed<s>/                 BatchNorm rerun with last.pt (scripts/run_tagcn_ckpt.sh)
+        last_beam/                                        last.pt: greedy / beam 100 (± 2-opt), TSP-20/50/100, k = 0.5 n
 and the earlier results of the other three models with the same protocol (nothing is recomputed):
     results/runs/<m>_seed<s>/, results/phase2_batch2/kfrac05/<m>_seed<s>/,
     results/phase2_checks/ln/last_kfrac05/<m>_layernorm_ckpt_seed<s>/, results/phase2_beam/phase1/<m>_seed<s>/.
@@ -72,6 +74,9 @@ BLOCKS = {
              tuple(k for dec in ("greedy", "beam10", "beam100") for k in (dec, dec + "+2opt")),
              lambda a, s: f"runs/{tag_run(a, s)}/beam" if a in TAGCN else f"phase2_beam/phase1/{a}_seed{s}"),
 }
+# BatchNorm reruns with --extra-checkpoints: last.pt of the phase 1 protocol (TAGCN only).
+CKPT_RUN = lambda a, s: f"runs/{a}_ckpt_seed{s}"
+LAST_METHODS = ("greedy", "greedy+2opt", "beam100", "beam100+2opt")
 METHOD_LABELS = {"greedy": "greedy", "greedy+2opt": "+ 2-opt", "beam10": "B=10", "beam10+2opt": "B=10 + 2-opt",
                  "beam100": "B=100", "beam100+2opt": "B=100 + 2-opt"}
 BASE_LABELS = {"greedy": "Classical greedy", "christofides": "Christofides"}
@@ -83,6 +88,13 @@ def load_all(results):
     """{block: {arch: [per seed: (eval.json, per-instance dict) or None]}}."""
     return {b: {a: [batch2.load_folder(os.path.join(results, folder(a, s))) for s in SEEDS] for a in ARCHS}
             for b, (_, _, _, folder) in BLOCKS.items()}
+
+
+def load_last(results):
+    """{arch: [per seed: (eval.json, per-instance) of last.pt or None]} and the same for the rerun's best.pt."""
+    last = {a: [batch2.load_folder(os.path.join(results, CKPT_RUN(a, s), "last_beam")) for s in SEEDS] for a in TAGCN}
+    rerun = {a: [batch2.load_folder(os.path.join(results, CKPT_RUN(a, s))) for s in SEEDS] for a in TAGCN}
+    return last, rerun
 
 
 def complete(runs, d):
@@ -142,8 +154,11 @@ MAIN_COLS = [("phase1", "tsp20_test", "Phase 1 TSP-20"), ("phase1", "tsp50_test"
              ("beam", "tsp50_test", "B=100 TSP-50"), ("beam", "tsp100_test", "B=100 TSP-100")]
 
 
-def table_main(data, baselines):
-    """Mean gap over the 3 seeds: 'without 2-opt / with 2-opt' in each cell; bold = best model in the column."""
+def table_main(data, baselines, last=None):
+    """Mean gap over the 3 seeds: 'without 2-opt / with 2-opt' in each cell; bold = best model in the column.
+
+    last: TAGCN last.pt rows (BatchNorm reruns), shown below and not counted for the bold.
+    """
     lines = ["| Method | " + " | ".join(lab for _, _, lab in MAIN_COLS) + " |", "|---|" + "---|" * len(MAIN_COLS)]
     for b, name in BASE_LABELS.items():
         cells = [f"{base_cell(baselines, d, b)} / {base_cell(baselines, d, b + '+2opt')}" for _, d, _ in MAIN_COLS]
@@ -163,7 +178,16 @@ def table_main(data, baselines):
                 txt = cell(gaps(data[blk][a], d, pre + suffix))
                 parts.append(f"**{txt}**" if best[blk, d, suffix] == a else txt)
             cells.append(" / ".join(parts))
-        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+        lines.append(f"| {name}{' (best.pt)' if a in TAGCN else ''} | " + " | ".join(cells) + " |")
+    for a in TAGCN if last else ():
+        cells = []
+        for blk, d, _ in MAIN_COLS:
+            if blk == "ln" or (blk == "phase1" and d != "tsp20_test"):
+                cells.append("—")      # last.pt was only evaluated with k = 0.5 n (= k = 10 on TSP-20)
+                continue
+            pre = "beam100" if blk == "beam" else "greedy"
+            cells.append(" / ".join(cell(gaps(last[a], d, pre + suffix)) for suffix in ("", "+2opt")))
+        lines.append(f"| {ARCHS[a][0]} (last.pt, rerun) | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -208,6 +232,51 @@ def table_params(results, histories):
         minutes = f"{np.mean([sum(h['seconds'] for h in hist) for hist in hs]) / 60:.1f}" if hs else "missing"
         lines.append(f"| {name} | {layers} | {tag_k} | {layers * tag_k} | {total:,}{check} | {encoder:,} | "
                      f"{peak} | {minutes} |")
+    return "\n".join(lines)
+
+
+def table_last(last, rerun, baselines):
+    """TAGCN last.pt of the BatchNorm reruns: mean ± std over seeds, all datasets and methods."""
+    cols = [(d, m) for d in DATASETS for m in LAST_METHODS]
+    lines = ["| Method | " + " | ".join(f"{DATASETS[d]} {METHOD_LABELS[m]}" for d, m in cols) + " | Epoch |",
+             "|---|" + "---|" * (len(cols) + 1)]
+    for b, name in BASE_LABELS.items():
+        cells = [base_cell(baselines, d, m.replace("greedy", b)) for d, m in cols]
+        lines.append(f"| {name} | " + " | ".join(cells) + " | — |")
+    for a in TAGCN:
+        cells = [cell(gaps(last[a], d, m), std=True) for d, m in cols]
+        epochs = ", ".join(str(r[0]["meta"]["epoch"]) if r else "?" for r in last[a])
+        lines.append(f"| {ARCHS[a][0]} last.pt | " + " | ".join(cells) + f" | {epochs} |")
+    return "\n".join(lines)
+
+
+def table_rerun(data, rerun, results):
+    """best.pt of the first run vs. best.pt of the rerun (same seed and code), per run."""
+    lines = ["| Run | Selected epoch (first / rerun) | Val gap at that epoch (first / rerun) | "
+             "Max abs. diff. of the val loss curves | TSP-20 greedy (first / rerun) | TSP-50 greedy (first / rerun) | "
+             "Identical per-instance gaps, TSP-20 + TSP-50 greedy |",
+             "|---|---|---|---|---|---|---|"]
+    for a in TAGCN:
+        for s, first, again in zip(SEEDS, data["phase1"][a], rerun[a]):
+            if first is None or again is None:
+                lines.append(f"| {tag_run(a, s)} | missing | | | | | |")
+                continue
+            hists = []
+            for path in (os.path.join(results, "runs", tag_run(a, s), "history.json"),
+                         os.path.join(results, CKPT_RUN(a, s), "history.json")):
+                with open(path) as f:
+                    hists.append([h["val_loss"] for h in json.load(f)])
+            dloss = max(abs(x - y) for x, y in zip(*hists))
+            m1, m2 = first[0]["meta"], again[0]["meta"]
+            same, total = 0, 0
+            for d in ("tsp20_test", "tsp50_test"):
+                diff = np.abs(first[1][f"{d}__greedy"] - again[1][f"{d}__greedy"])
+                same, total = same + int((diff <= TIE_TOL).sum()), total + len(diff)
+            g = lambda r, d: f"{r[0][d]['greedy']['gap_mean']:.2f}"
+            lines.append(f"| {tag_run(a, s)} | {m1['best_epoch']} / {m2['best_epoch']} | "
+                         f"{m1['best_val_gap']:.2f} / {m2['best_val_gap']:.2f} | {dloss:.1e} | "
+                         f"{g(first, 'tsp20_test')} / {g(again, 'tsp20_test')} | "
+                         f"{g(first, 'tsp50_test')} / {g(again, 'tsp50_test')} | {same}/{total} |")
     return "\n".join(lines)
 
 
@@ -349,6 +418,7 @@ def build_report(results, figs_dir=None):
     baselines = batch2.load_baselines(results)
     base = checks.load_base_per_instance(results)
     histories = load_histories(results)
+    last, rerun = load_last(results)
     if figs_dir:
         plot_curves(histories, figs_dir)
     t1, _ = table_tests(phase1_tests(data, base))
@@ -356,6 +426,8 @@ def build_report(results, figs_dir=None):
     notes_path = os.path.join(results, "tagcn_notes.md")
     notes = open(notes_path).read().strip() if os.path.exists(notes_path) else "(to be written after reading the results)"
     missing = [BLOCKS[b][3](a, s) for b in BLOCKS for a in TAGCN for s, r in zip(SEEDS, data[b][a]) if r is None]
+    missing += [f"{CKPT_RUN(a, s)}/last_beam" for a in TAGCN for s, r in zip(SEEDS, last[a]) if r is None]
+    missing += [CKPT_RUN(a, s) for a in TAGCN for s, r in zip(SEEDS, rerun[a]) if r is None]
     lines = [
         "# TAGCN — fourth encoder, phase 1 and phase 2 protocol",
         "",
@@ -373,9 +445,11 @@ def build_report(results, figs_dir=None):
         "Phase 1: k = 10 test graphs. k=0.5n: the same phase 1 checkpoints on test graphs with k = 0.5 n "
         "(25 on TSP-50, 50 on TSP-100). LayerNorm: retrained with LayerNorm, last epoch, k = 0.5 n. B=100: beam search "
         "of width 100 on the phase 1 checkpoints, k = 0.5 n; baseline cells there are the plain baselines. "
-        "Bold = best model in that column and variant.",
+        "Bold = best model in that column and variant (best.pt rows only). *last.pt, rerun*: last epoch of the "
+        "BatchNorm reruns (Table 7); it was evaluated only with k = 0.5 n (identical to k = 10 on TSP-20), so the "
+        "phase 1 TSP-50 and LayerNorm cells are empty.",
         "",
-        table_main(data, baselines),
+        table_main(data, baselines, last),
         "",
         "## Table 2 — parameters",
         "",
@@ -413,6 +487,24 @@ def build_report(results, figs_dir=None):
         "## Table 6 — consistency check: TAGCN greedy in the beam run vs. earlier evaluation of the same checkpoint",
         "",
         consistency(data),
+        "",
+        "## Table 7 — TAGCN last.pt (BatchNorm reruns), k = 0.5 n",
+        "",
+        "The first TAGCN batch trained the BatchNorm runs without `--extra-checkpoints`, so it has no last.pt. "
+        "The 6 runs were trained again with the same code, seeds and protocol into `results/runs/tagcn_k<K>_ckpt_seed<s>/` "
+        "and their last.pt (epoch 20) was evaluated (greedy and B=100, without / with 2-opt). Mean ± std over seeds.",
+        "",
+        table_last(last, rerun, baselines),
+        "",
+        "## Table 8 — best.pt of the first run vs. the rerun",
+        "",
+        "Same code, seed, data and batch order. The two runs are still not bit-for-bit identical: the message "
+        "sums on the GPU (`scatter` with atomic additions) are done in a non-deterministic order, so the floating "
+        "point roundings differ from run to run, and the small differences grow during training. Because the "
+        "validation gap is nearly flat over the epochs (see note 2), such differences can change which epoch is "
+        "selected. Hence last.pt (Table 7) and the best.pt of Tables 1–5 come from different, equivalent runs.",
+        "",
+        table_rerun(data, rerun, results),
         "",
         "## Decisions",
         "",

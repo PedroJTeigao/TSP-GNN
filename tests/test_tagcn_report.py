@@ -39,7 +39,7 @@ def fake_results(root, skip=()):
                     continue
                 folder = os.path.join(root, folder_of(a, s))
                 os.makedirs(folder, exist_ok=True)
-                ev, pi = {"meta": {"best_epoch": 20, "config": {}}}, {}
+                ev, pi = {"meta": {"best_epoch": 20, "best_val_gap": 6.0, "config": {}}}, {}
                 for d in datasets:
                     shift = 4 if a in report.TAGCN else 2
                     for m in methods:
@@ -49,6 +49,25 @@ def fake_results(root, skip=()):
                 with open(os.path.join(folder, "eval.json"), "w") as f:
                     json.dump(ev, f)
                 np.savez(os.path.join(folder, "eval_per_instance.npz"), **pi)
+    for a in report.TAGCN:                                   # BatchNorm reruns: best.pt (k = 10) and last.pt
+        for s in report.SEEDS:
+            if ("rerun", a, s) in skip:
+                continue
+            run = os.path.join(root, report.CKPT_RUN(a, s))
+            for folder, ds, methods, meta in ((run, ("tsp20_test", "tsp50_test"), ("greedy", "greedy+2opt"),
+                                               {"best_epoch": 5, "best_val_gap": 6.0}),
+                                              (os.path.join(run, "last_beam"), report.DATASETS, report.LAST_METHODS,
+                                               {"epoch": 20})):
+                os.makedirs(folder, exist_ok=True)
+                ev = {"meta": meta, **{d: {m: {"gap_mean": float((base_pi[f"{d}__greedy"] - 4).mean())}
+                                           for m in methods} for d in ds}}
+                with open(os.path.join(folder, "eval.json"), "w") as f:
+                    json.dump(ev, f)
+                np.savez(os.path.join(folder, "eval_per_instance.npz"),
+                         **{f"{d}__{m}": base_pi[f"{d}__greedy"] - 4 for d in ds for m in methods})
+            with open(os.path.join(run, "history.json"), "w") as f:
+                json.dump([{"epoch": e, "val_gap_greedy": 7.0, "val_loss": 0.6 - 0.01 * e + 1e-3,
+                            "seconds": 3.0, "peak_gpu_mb": 100.0} for e in range(1, 21)], f)
     for ln in (False, True):
         for a in report.ARCHS:
             for s in report.SEEDS:
@@ -69,12 +88,15 @@ def test_tagcn_report(tmp_path):
     assert "| 600 | 0 | 0.00e+00 |" in text                     # consistency check: 3 seeds × 200, all identical
     assert "## Missing results\n\nNone." in text
     assert "(to be written after reading the results)" in text
+    assert "| TAGCN K=3 (last.pt, rerun) |" in text and "| TAGCN K=2 last.pt |" in text
+    assert "| tagcn_k2_seed0 | 20 / 5 | " in text and "| 1.0e-03 |" in text and "| 400/400 |" in text
 
 
 def test_tagcn_report_missing_and_notes(tmp_path):
-    fake_results(str(tmp_path), skip={("ln", "tagcn_k3", 1)})
+    fake_results(str(tmp_path), skip={("ln", "tagcn_k3", 1), ("rerun", "tagcn_k2", 0)})
     (tmp_path / "tagcn_notes.md").write_text("1. A hand-written note.\n")
     text = report.build_report(str(tmp_path))
     assert "runs/tagcn_k3_layernorm_seed1/last_kfrac05" in text
     assert "| TAGCN K=3 | missing | missing | missing | missing | missing | missing |" in text
     assert "1. A hand-written note." in text
+    assert "runs/tagcn_k2_ckpt_seed0/last_beam" in text and "| tagcn_k2_seed0 | missing |" in text
