@@ -80,8 +80,8 @@ DATA_PID=$!
 
 for n in "${SIZES[@]}"; do
     name=tsp${n}_test
-    while [ ! -f "$LOGDIR/data_${name}.done" ] && [ ! -f "$LOGDIR/data_${name}.failed" ]; do sleep 60; done
-    if [ -f "$LOGDIR/data_${name}.failed" ]; then
+    while [ ! -f "$LOGDIR/data_tsp${n}.done" ] && [ ! -f "$LOGDIR/data_tsp${n}.failed" ]; do sleep 60; done
+    if [ -f "$LOGDIR/data_tsp${n}.failed" ]; then
         log "SKIP  everything on $name (no data)"; continue
     fi
     if [ -f "$OUT/baselines/${name}.json" ]; then
