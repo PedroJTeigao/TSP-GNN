@@ -35,6 +35,22 @@ def solve_lkh(coords, runs=10):
     return np.roll(tour, -start)
 
 
+def solve_lkh_coords(coords, runs=10):
+    """Solve one instance with LKH from its coordinates (no (n, n) matrix, for large n).
+
+    Same problem as solve_lkh: the coordinates are multiplied by SCALE and LKH (EUC_2D) rounds each
+    distance to the nearest integer. Returns the tour as an (n,) integer array that starts at city 0.
+    """
+    from elkai import _elkai   # the low-level call that elkai's own classes use
+
+    xy = np.rint(np.asarray(coords) * SCALE).astype(np.int64)
+    problem = (f"TYPE : TSP\nDIMENSION : {len(xy)}\nEDGE_WEIGHT_TYPE : EUC_2D\nNODE_COORD_SECTION\n"
+               + "".join(f"{i + 1} {x} {y}\n" for i, (x, y) in enumerate(xy.tolist())))
+    tour = np.asarray(_elkai.solve_problem(f"RUNS = {runs}\nPROBLEM_FILE = :stdin:\n", problem), dtype=np.int64) - 1
+    start = int(np.where(tour == 0)[0][0])
+    return np.roll(tour, -start)
+
+
 def tour_length(coords, tour):
     """Real tour length (float distances), including the closing edge."""
     ordered = coords[tour]                    # cities in tour order

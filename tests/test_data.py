@@ -48,3 +48,12 @@ def test_lkh_matches_brute_force():
         lkh = tour_length(coords, solve_lkh(coords))
         # Small tolerance: LKH optimizes distances rounded to 1e-6.
         assert abs(lkh - brute_force_optimum(coords)) < 1e-5
+
+
+def test_solve_lkh_coords_matches_matrix_version():
+    from tsp_gnn.data import solve_lkh_coords
+    for seed in range(3):
+        coords = generate_instances(1, 30, seed)[0]
+        tour = solve_lkh_coords(coords)
+        assert is_valid_tour(tour, 30) and tour[0] == 0
+        assert np.isclose(tour_length(coords, tour), tour_length(coords, solve_lkh(coords)), rtol=1e-6)
