@@ -130,7 +130,7 @@ def table_training(R):
         for s in SEEDS:
             path = os.path.join(R["runs_dir"], model_folder(train, s), *(["kfrac05"] if train == "tsp20" else []), "eval.json")
             if not os.path.exists(path):
-                lines.append(f"| {train.upper()} | {s} | missing | | | |")
+                lines.append(f"| TSP-{TRAIN_SIZE[train]} | {s} | missing | | | |")
                 continue
             with open(path) as f:
                 e = json.load(f)
@@ -140,7 +140,7 @@ def table_training(R):
                     meta = json.load(f)["meta"]
             cells = [f"{e[d]['greedy']['gap_mean']:.2f} / {e[d]['greedy+2opt']['gap_mean']:.2f}" if d in e else "—"
                      for d in ("tsp50_test", "tsp100_test")]
-            lines.append(f"| {train.upper()} | {s} | {meta['best_epoch']} | {meta['best_val_gap']:.2f} | " + " | ".join(cells) + " |")
+            lines.append(f"| TSP-{TRAIN_SIZE[train]} | {s} | {meta['best_epoch']} | {meta['best_val_gap']:.2f} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -236,7 +236,7 @@ def table_small(R):
             cells = []
             for a, ref in (("matched", "tsp20"), ("matched", "lkh"), ("tsp20", "lkh")):
                 if a == "matched" and matched(w) == "tsp20":
-                    cells.append("— (same model)")
+                    cells.append("— (w = 20: the matched model is the TSP-20 model)")
                     continue
                 ra, rr = runs_of(R, a, n, w), runs_of(R, ref, n, w)
                 if ra is None or rr is None:
@@ -275,6 +275,8 @@ def plot_pareto(R, figs_dir):
             x = [np.mean(p["s"]) for _, p in pts]
             y = [np.mean(p["gap"]) for _, p in pts]
             ax.plot(x, y, "-o", color=color, linewidth=2, markersize=7, label=label)
+            if solver == "tsp20":
+                continue                                  # same w as the matched model's points, just next to them
             for (w, _), xx, yy in zip(pts, x, y):
                 ax.annotate(f"w={w}", (xx, yy), textcoords="offset points", xytext=(6, 4), fontsize=7, color=INK)
         _log_x(ax)

@@ -66,7 +66,7 @@ def test_wsize_report(tmp_path):
     assert "0.05/27 = " in text                     # 5 w × 3 + 4 w × 3 matched comparisons
     assert "| 1000 | 20 | TSP-20 model vs. greedy edge + 2-opt | **better** |" in text
     assert "(9/9 shorter)" in text
-    assert "| TSP100 | 2 | 3 | 5.00 | 10.00 / 3.00 | 10.00 / 3.00 |" in text
+    assert "| TSP-100 | 2 | 3 | 5.00 | 10.00 / 3.00 | 10.00 / 3.00 |" in text
 
 
 def test_wsize_report_missing(tmp_path):
