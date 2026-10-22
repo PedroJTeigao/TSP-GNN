@@ -245,15 +245,18 @@ def greedy_path(heat, pts, s, t):
     return _walk(edges, m, s)
 
 
-def beam_path(heat, pts, s, t, beam_width=10):
+def beam_path(heat, pts, s, t, beam_width=10, info=False):
     """Beam search version of greedy_path (same candidates and constraints, as decode.beam_search_decode).
 
     Each partial solution is extended by its first beam_width valid candidates, children ranked by the
     sum of log-probabilities, duplicate edge sets removed; the shortest final path is returned.
+    With info=True also returns {"logp": sum of log-probabilities of the returned path,
+    "scores": those of all final paths, highest first} (the model's confidence, phase 3 triage).
     """
     m = len(pts)
     if m <= 2:
-        return greedy_path(heat, pts, s, t)
+        path = greedy_path(heat, pts, s, t)
+        return (path, {"logp": 0.0, "scores": np.zeros(1)}) if info else path
     ca, cb, cand_score = _path_candidates(heat, pts)
     keys = np.random.default_rng(0).integers(0, 2**63, size=len(ca), dtype=np.uint64)
     cap = np.full(m, 2, dtype=np.int8); cap[s] = cap[t] = 1
@@ -288,7 +291,10 @@ def beam_path(heat, pts, s, t, beam_width=10):
         edges[:, step, 0], edges[:, step, 1] = a, b
     paths = [_walk(e.tolist(), m, s) for e in edges]
     lengths = [np.sqrt(((pts[p[1:]] - pts[p[:-1]]) ** 2).sum(axis=1)).sum() for p in paths]
-    return paths[int(np.argmin(lengths))]
+    best = int(np.argmin(lengths))
+    if info:
+        return paths[best], {"logp": float(score[best]), "scores": np.sort(score)[::-1]}
+    return paths[best]
 
 
 # ---------------------------------------------------------------- stitching
