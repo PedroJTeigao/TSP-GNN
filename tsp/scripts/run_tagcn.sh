@@ -25,9 +25,9 @@ if [ "$(nice)" -lt 10 ]; then
     exec nice -n $((10 - $(nice))) bash "$SCRIPT" "$@"
 fi
 
-source env.sh
+source ../env.sh   # env.sh and tmp/ live in the repository root
 # $HOME is on AFS, whose tokens may expire after logout: keep caches and git config away from it.
-export MPLCONFIGDIR="$PWD/tmp/mplconfig" XDG_CACHE_HOME="$PWD/tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
+export MPLCONFIGDIR="$PWD/../tmp/mplconfig" XDG_CACHE_HOME="$PWD/../tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
 mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME" results/figs
 
 LOG=results/tagcn.log

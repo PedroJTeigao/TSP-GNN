@@ -25,9 +25,9 @@ if [ "$(nice)" -lt 10 ]; then
     exec nice -n $((10 - $(nice))) bash "$SCRIPT" "$@"
 fi
 
-source env.sh
+source ../env.sh   # env.sh and tmp/ live in the repository root
 # $HOME is on AFS, whose tokens may expire after logout: keep caches and git config away from it.
-export MPLCONFIGDIR="$PWD/tmp/mplconfig" XDG_CACHE_HOME="$PWD/tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
+export MPLCONFIGDIR="$PWD/../tmp/mplconfig" XDG_CACHE_HOME="$PWD/../tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
 # Three lanes in parallel: each one uses a few CPU threads for PyTorch (decoding itself is single-threaded).
 export OMP_NUM_THREADS=2
 OUT=results/phase2_beam

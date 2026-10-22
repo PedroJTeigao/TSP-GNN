@@ -19,8 +19,8 @@ if [ "$(nice)" -lt 10 ]; then
     exec nice -n $((10 - $(nice))) bash "$SCRIPT" "$@"
 fi
 
-source env.sh
-export MPLCONFIGDIR="$PWD/tmp/mplconfig" XDG_CACHE_HOME="$PWD/tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
+source ../env.sh   # env.sh and tmp/ live in the repository root
+export MPLCONFIGDIR="$PWD/../tmp/mplconfig" XDG_CACHE_HOME="$PWD/../tmp/cache" GIT_CONFIG_GLOBAL=/dev/null
 export OMP_NUM_THREADS=1
 OUT=results/phase3_triage
 LOGDIR=$OUT/logs

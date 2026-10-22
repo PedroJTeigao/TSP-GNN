@@ -20,7 +20,7 @@
 - GPU T4 partilhada: ~7 GB livres. Manter cada treino abaixo de 6 GB.
 - Treinos longos com `nice -n 10`.
 - Não editar ~/.bashrc nem ~/.claude.
-- Dados em data/ e resultados em results/ (fora do git).
+- Dois sub-projetos: tsp/ (fechado) e milp/ (novo). Dados em <sub-projeto>/data e resultados em <sub-projeto>/results (fora do git); os comandos do TSP correm a partir de tsp/.
 - Avançar passo a passo e explicar o que cada passo faz: estou a aprender.
 
 ## Repositório

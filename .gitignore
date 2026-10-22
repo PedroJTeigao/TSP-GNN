@@ -1,6 +1,8 @@
 .venv/
-data/
-results/
+tsp/data/
+tsp/results/
+milp/data/
+milp/results/
 tmp/
 *.pt
 .claude/settings.local.json
