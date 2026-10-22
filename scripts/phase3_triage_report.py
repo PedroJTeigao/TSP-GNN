@@ -19,6 +19,7 @@ import os
 import matplotlib
 matplotlib.use("Agg")  # no window: only save files
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 import numpy as np
 from scipy.stats import spearmanr
 
@@ -407,6 +408,9 @@ def plot_pareto(R, figs_dir):
                     ax.annotate(f"{q.split('_top')[1]} %", (xx, yy), textcoords="offset points", xytext=(6, 4),
                                 fontsize=7, color=INK)
         ax.set_xscale("log")
+        ax.xaxis.set_major_locator(matplotlib.ticker.LogLocator(subs=(1, 2, 5)))
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%g"))
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
         summarize.style_axes(ax)
         ax.set_title(f"n = {n}", color=INK, fontsize=9, loc="left")
         ax.set_xlabel("Total time per instance (s, log scale)", color=INK)
@@ -455,7 +459,7 @@ def build_report(results, figs_dir=None):
         "the model's k-NN graph counts as 0);",
         "  - **logp** = mean log-probability per edge of the returned beam path;",
         "  - **margin** = highest − second highest final beam score, per edge;",
-        "  - **model gain** = relative shortening by the beam path (it needs the beam, so it is not free).",
+        "  - **model gain** = relative shortening by the beam path (it needs the beam, so it is not free; for (i) it is trivially exact when positive, since LKH is at least as good, hence the flat start of its curve).",
         "- **Targets:** (i) LKH shortens the window; (ii) the beam path catches ≥ 80 % of LKH's gain, "
         "defined only on the windows of (i).",
         "- **Policies** (≤ 3 passes, each pass = offsets 0 and w/2):",
