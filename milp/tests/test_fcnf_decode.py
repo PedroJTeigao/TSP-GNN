@@ -3,7 +3,7 @@ Run with: pytest tests/"""
 
 import numpy as np
 
-from fcnf_gnn.decode import connect_terminals, delegate, lp_round, prune, slope_scaling, warm
+from fcnf_gnn.decode import connect_terminals, delegate, lp_round, prune, slope_scaling, trust_region, warm
 from fcnf_gnn.generate import generate_instances
 from fcnf_gnn.solver import is_feasible, solve_fcnf
 
@@ -44,3 +44,15 @@ def test_decoders_feasible_on_random_instances():
             assert r["cost"] >= opt - 1e-6 * opt
         assert abs(results[2]["cost"] - opt) < 1e-6 * opt                       # warm start = full MILP
         assert results[4]["cost"] <= heur["cost"] + 1e-9                         # delegation never worse
+
+
+def test_trust_region_budget():
+    inst, p = bottleneck()                         # q = 33: arc 0 free, arcs 1, 2 outside the prediction
+    assert trust_region(inst, p, q=33, delta=1)["x"] is None             # 0->1->2 needs 2 outside arcs
+    r = trust_region(inst, p, q=33, delta=2)
+    assert r["outside_used"] == 2 and abs(r["cost"] - solve_fcnf(inst)["cost"]) < 1e-9
+    assert is_feasible(inst, r["x"], r["y"])
+    for inst in generate_instances(3, 20, seed=12):                     # delta = m: same as the full MILP
+        p = np.random.default_rng(1).random(len(inst["src"]))
+        r = trust_region(inst, p, q=20, delta=len(p))
+        assert abs(r["cost"] - solve_fcnf(inst)["cost"]) < 1e-6 * r["cost"]

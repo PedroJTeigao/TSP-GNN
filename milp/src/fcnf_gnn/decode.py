@@ -21,6 +21,9 @@ Decoders with a heatmap p (one probability per arc):
                 arcs; the MILP is free only on the arcs adjacent to the 30 % nodes with the largest
                 disagreement and every other arc is fixed to the heuristic (closed or open); the
                 heuristic solution is the warm start, so the restricted MILP is always feasible
+    trust_region  trust region (Han et al. 2023, predict-and-search): the top q % arcs by p are free and
+                at most delta of the other arcs may open (Σ y <= delta on them); no repair, so it can
+                be infeasible (a terminal that needs more than delta arcs outside the prediction)
 Baselines without a network:
     slope       slope scaling alone (Kim & Pardalos 1999)
     lp_round    LP relaxation, y = 1[y_lp >= 0.5], min-cost flow on those arcs, repaired as in prune
@@ -123,6 +126,21 @@ def prune(inst, p, q, time_limit=None):
         keep[missing[:int(np.ceil(REPAIR_BLOCK * m))]] = True
     return _finish(inst, r["x"], time.perf_counter() - start, first_feasible=repairs == 0,
                    kept_frac=float(keep.mean()), repairs=repairs, bfs_added=bfs_added, milp_status=r["status"])
+
+
+def trust_region(inst, p, q, delta, time_limit=None):
+    """MILP with the top q % arcs free and at most delta open arcs among the others.
+    outside_used = open arcs of the final solution outside the top q % (-1 without a solution)."""
+    start = time.perf_counter()
+    m = len(inst["src"])
+    order = np.argsort(-np.asarray(p), kind="stable")
+    outside = order[int(np.ceil(q / 100 * m)):]
+    r = solve_fcnf(inst, time_limit=time_limit, budget=(outside, delta))
+    out = _finish(inst, r["x"], time.perf_counter() - start)
+    used = -1 if out["x"] is None else int(out["y"][outside].sum())
+    out.update(first_feasible=r["x"] is not None, kept_frac=1 - len(outside) / m, repairs=0, outside_used=used,
+               milp_status=r["status"])
+    return out
 
 
 def warm(inst, p, time_limit=None, threshold=0.5):

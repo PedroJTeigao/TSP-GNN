@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from fcnf_gnn.generate import generate_instances
 from fcnf_gnn.solver import is_feasible, solution_cost, solve_fcnf
 
 
@@ -44,3 +45,14 @@ def test_lp_relaxation_and_warm_start():
     assert abs(r["cost"] - 4.8) < 1e-9
     r = solve_fcnf(triangle(), warm_start=[1, 0, 0])     # a worse start does not change the optimum
     assert abs(r["cost"] - 6.0) < 1e-9
+
+
+def test_full_warm_start_and_trajectory():
+    from fcnf_gnn.decode import slope_scaling
+    inst = generate_instances(1, 20, seed=13)[0]
+    heur = slope_scaling(inst)
+    r = solve_fcnf(inst, warm_start=(heur["x"], heur["y"]), trajectory=True)
+    traj = r["trajectory"]
+    assert abs(traj[0, 1] - heur["cost"]) < 1e-6 * heur["cost"]          # the warm start is the first incumbent
+    assert np.all(np.diff(traj[:, 0]) >= 0) and np.all(np.diff(traj[:, 1]) <= 1e-9)
+    assert abs(traj[-1, 1] - r["cost"]) < 1e-6 * r["cost"]

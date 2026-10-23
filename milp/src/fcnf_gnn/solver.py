@@ -53,14 +53,19 @@ def _build(inst, fixed_zero=None, relax=False, fixed_one=None):
     return lp
 
 
-def solve_fcnf(inst, time_limit=None, fixed_zero=None, warm_start=None, relax=False, threads=1, fixed_one=None):
+def solve_fcnf(inst, time_limit=None, fixed_zero=None, warm_start=None, relax=False, threads=1, fixed_one=None,
+               budget=None, trajectory=False):
     """Solve one FCNF instance (MILP, or its LP relaxation with relax=True).
 
     time_limit   seconds (None = until optimality)
     fixed_zero   iterable of arc indices forced closed (y = 0, x = 0), e.g. the pruned arcs
     fixed_one    iterable of arc indices forced open (y = 1; F is paid even without flow)
     warm_start   (m,) 0/1 vector of y used as a starting point; HiGHS completes x itself
-                 (it is only used if it can be completed to a feasible solution)
+                 (it is only used if it can be completed to a feasible solution);
+                 or a pair (x, y) = a complete solution, given to HiGHS as it is
+    budget       (arcs, delta): adds the row  Σ_{a in arcs} y_a <= delta  (trust region)
+    trajectory   True: also return "trajectory", one (seconds, cost, bound) row per improving
+                 solution found by HiGHS (seconds since the start of the solve)
     Returns a dict: status ("optimal" / "time_limit" / "infeasible" / other HiGHS status),
     cost, x, y (None if no feasible solution was found), mip_gap (relative, 0 when optimal),
     bound (best lower bound), nodes, seconds.
@@ -74,9 +79,22 @@ def solve_fcnf(inst, time_limit=None, fixed_zero=None, warm_start=None, relax=Fa
     if time_limit is not None:
         h.setOptionValue("time_limit", float(time_limit))
     h.passModel(_build(inst, fixed_zero, relax, fixed_one))
+    if budget is not None:
+        arcs = np.asarray(budget[0], dtype=np.int32)
+        h.addRow(-highspy.kHighsInf, float(budget[1]), len(arcs), m + arcs, np.ones(len(arcs)))
     if warm_start is not None and not relax:
-        y0 = np.asarray(warm_start, dtype=float)
-        h.setSolution(m, np.arange(m, 2 * m, dtype=np.int32), y0)
+        if isinstance(warm_start, tuple):              # complete solution (x, y)
+            col = np.concatenate([np.asarray(warm_start[0], float), np.asarray(warm_start[1], float)])
+            h.setSolution(2 * m, np.arange(2 * m, dtype=np.int32), col)
+        else:
+            y0 = np.asarray(warm_start, dtype=float)
+            h.setSolution(m, np.arange(m, 2 * m, dtype=np.int32), y0)
+    traj = []
+    if trajectory and not relax:
+        def improving(event):
+            o = event.data_out
+            traj.append((o.running_time, o.objective_function_value, o.mip_dual_bound))
+        h.cbMipImprovingSolution.subscribe(improving)
     start = time.perf_counter()
     h.run()
     seconds = time.perf_counter() - start
@@ -90,6 +108,8 @@ def solve_fcnf(inst, time_limit=None, fixed_zero=None, warm_start=None, relax=Fa
     has_solution = info.primal_solution_status == 2       # 2 = feasible point available
     out = {"status": status, "seconds": seconds, "cost": None, "x": None, "y": None,
            "mip_gap": None, "bound": None, "nodes": None}
+    if trajectory:
+        out["trajectory"] = np.array(traj, dtype=float).reshape(-1, 3)
     if not relax:
         out["nodes"] = int(info.mip_node_count)
         out["bound"] = float(info.mip_dual_bound)
