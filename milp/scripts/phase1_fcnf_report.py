@@ -286,7 +286,10 @@ def figure(data, refs, decode, out_path):
             ring = {} if marker == "x" else {"edgecolor": "white", "linewidth": 1.5}
             ax.scatter(np.mean(a["seconds"]), np.nanmean(a["gap"]), s=55, color=color, marker=marker, zorder=3,
                        label=label, **ring)
-        point(method_arrays(s, "milp", data, refs, decode), "MILP (full)", colors["milp"], "s")
+        # the full MILP sits on the same point as the warm starts: a large hollow square drawn on top
+        a = method_arrays(s, "milp", data, refs, decode)
+        ax.scatter(np.mean(a["seconds"]), np.nanmean(a["gap"]), s=170, facecolors="none", edgecolors=colors["milp"],
+                   linewidths=1.8, marker="s", zorder=5, label="MILP (full)")
         for m in BASELINES:
             a = method_arrays(s, m, data, refs, decode)
             if a is not None:
