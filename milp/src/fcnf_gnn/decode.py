@@ -130,7 +130,8 @@ def prune(inst, p, q, time_limit=None):
 
 def trust_region(inst, p, q, delta, time_limit=None):
     """MILP with the top q % arcs free and at most delta open arcs among the others.
-    outside_used = open arcs of the final solution outside the top q % (-1 without a solution)."""
+    outside_used = open arcs of the final solution outside the top q % (-1 without a solution);
+    proven = the restricted MILP was solved to optimality (not stopped by the time limit)."""
     start = time.perf_counter()
     m = len(inst["src"])
     order = np.argsort(-np.asarray(p), kind="stable")
@@ -139,7 +140,7 @@ def trust_region(inst, p, q, delta, time_limit=None):
     out = _finish(inst, r["x"], time.perf_counter() - start)
     used = -1 if out["x"] is None else int(out["y"][outside].sum())
     out.update(first_feasible=r["x"] is not None, kept_frac=1 - len(outside) / m, repairs=0, outside_used=used,
-               milp_status=r["status"])
+               proven=r["status"] == "optimal", milp_status=r["status"])
     return out
 
 

@@ -5,7 +5,7 @@ reference cost (best known solution), so a better reference found later changes 
     --source <run name>   with results/runs/<run>/eval_probs.npz, --group guided: prune_q20, prune_q30, prune_q50,
                           delegate; --group warm: warm (a full MILP each, so the slow group on fcnf100);
                           --group trust: trust region tr_q<q>_d<delta> for q in 20/30/50, delta in 5/10/20
-                          (phase 1b; the flow of tr_q50_d20 is also saved, flat, as warm_x: the
+                          (--configs picks a subset) (phase 1b; the flow of tr_q50_d20 is also saved, flat, as warm_x: the
                           warm start of milp_trajectory.py --warm trust)
     --source baselines    slope, lp_round, random_q20, random_q30, random_q50 (prune with p uniform at random,
                           seed = instance index); --group is ignored
@@ -37,11 +37,11 @@ from fcnf_gnn.utils import git_info
 QS = (20, 30, 50)
 DELTAS = (5, 10, 20)
 WARM_TR = "tr_q50_d20"          # trust region whose solution is kept as a warm start
-FIELDS = ("cost", "seconds", "first_feasible", "kept_frac", "repairs", "bfs_added", "outside_used")
+FIELDS = ("cost", "seconds", "first_feasible", "kept_frac", "repairs", "bfs_added", "outside_used", "proven")
 
 
 def run_instance(job):
-    i, inst, p, time_limit, group = job
+    i, inst, p, time_limit, group, configs = job
     out = {}
     if p is None:                                         # baselines
         out["slope"] = slope_scaling(inst)
@@ -54,7 +54,8 @@ def run_instance(job):
     elif group == "trust":
         for q in QS:
             for delta in DELTAS:
-                out[f"tr_q{q}_d{delta}"] = trust_region(inst, p, q, delta, time_limit)
+                if configs is None or f"q{q}_d{delta}" in configs:
+                    out[f"tr_q{q}_d{delta}"] = trust_region(inst, p, q, delta, time_limit)
     else:
         for q in QS:
             out[f"prune_q{q}"] = prune(inst, p, q, time_limit)
@@ -79,6 +80,7 @@ def main():
     parser.add_argument("--source", required=True, help="run name in results/runs, or 'baselines'")
     parser.add_argument("--group", choices=("guided", "warm", "trust"), default="guided")
     parser.add_argument("--time-limit", type=float, default=None)
+    parser.add_argument("--configs", default=None, help="trust group: comma-separated q<q>_d<delta> (default: all 9)")
     parser.add_argument("--procs", type=int, default=8)
     parser.add_argument("--out-root", default="results/phase1_decode")
     parser.add_argument("--max-instances", type=int, default=None)
@@ -100,7 +102,8 @@ def main():
         probs = [flat[d["arc_ptr"][i]:d["arc_ptr"][i + 1]] for i in range(num)]
         with open(os.path.join("results", "runs", args.source, "eval.json")) as f:
             run_meta = {"best_epoch": json.load(f)["meta"]["best_epoch"]}
-    jobs = [(i, get_instance(d, i), probs[i], args.time_limit, group) for i in range(num)]
+    configs = None if args.configs is None else args.configs.split(",")
+    jobs = [(i, get_instance(d, i), probs[i], args.time_limit, group, configs) for i in range(num)]
     print(f"{name}: {num} instances, source {args.source}, group {group}, time limit {args.time_limit}, {args.procs} processes",
           flush=True)
 

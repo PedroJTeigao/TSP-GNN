@@ -3,8 +3,10 @@
 #
 #   bash scripts/run_phase1b.sh small            fcnf20 and fcnf50 (everything), then fcnf100: full MILP trajectory
 #                                                without warm start (200 instances) and with slope scaling (first 100)
-#   bash scripts/run_phase1b.sh fcnf100 RUN...   fcnf100, first 100 instances: trust region and trust-region warm
-#                                                start for the given runs, then the equal-time check sample
+#   bash scripts/run_phase1b.sh fcnf100          fcnf100, first 100 instances, tagcn_k3_seed0 only: trust region with a
+#                                                25 s limit (the time of pruning q50), q50 / delta 20 also with 120 s
+#                                                (results/phase1b/decode_tr120), warm start from the 25 s q50 / delta 20
+#                                                solution, then the equal-time check sample
 # Trust region and its warm start: TAGCN K=3 runs (the better encoder of phase 1). The equal-time baseline of
 # the phase 1 decoders (both encoders, 3 seeds) is read from the trajectories, no extra runs.
 # Time limit of every MILP: none on fcnf20, 120 s on fcnf50 / fcnf100. 8 processes, one HiGHS thread each.
@@ -62,12 +64,15 @@ traj() {      # set warm [source] [max instances]
         --warm "$warm" "${extra[@]}" $(limit_of "$set") --procs $PROCS --out-root "$OUT/traj"
 }
 
-trust() {     # set run [max instances]
-    local set=$1 r=$2 extra=()
+trust() {     # set run [max instances] [time limit] [configs] [out dir]
+    local set=$1 r=$2 extra=() limit dir=${6:-decode}
     [ -n "${3:-}" ] && extra+=(--max-instances "$3")
-    if [ -f "$OUT/decode/$r/${set}__trust.json" ]; then log "SKIP  trust $set $r (already done)"; return 0; fi
-    run "trust $set $r" "$LOGDIR/trust_${set}_$r.log" python -u scripts/decode_eval.py --data "data/$set.npz" \
-        --source "$r" --group trust "${extra[@]}" $(limit_of "$set") --procs $PROCS --out-root "$OUT/decode"
+    limit=$(limit_of "$set")
+    [ -n "${4:-}" ] && limit="--time-limit $4"
+    [ -n "${5:-}" ] && extra+=(--configs "$5")
+    if [ -f "$OUT/$dir/$r/${set}__trust.json" ]; then log "SKIP  trust $set $r $dir (already done)"; return 0; fi
+    run "trust $set $r $dir ($limit)" "$LOGDIR/trust_${set}_${r}_$dir.log" python -u scripts/decode_eval.py \
+        --data "data/$set.npz" --source "$r" --group trust "${extra[@]}" $limit --procs $PROCS --out-root "$OUT/$dir"
 }
 
 check() {     # set run instances [largest fixed limit] [methods]
@@ -79,7 +84,7 @@ check() {     # set run instances [largest fixed limit] [methods]
         --out-root "$OUT/equal_time_check"
 }
 
-stage=${1:?usage: run_phase1b.sh small | fcnf100 RUN...}
+stage=${1:?usage: run_phase1b.sh small | fcnf100}
 shift
 log "commit $(git rev-parse --short HEAD), stage $stage $*"
 if [ "$stage" = small ]; then
@@ -94,9 +99,10 @@ if [ "$stage" = small ]; then
     traj fcnf100_test none
     traj fcnf100_test slope "" 100
 elif [ "$stage" = fcnf100 ]; then
-    for r in "$@"; do trust fcnf100_test "$r" 100; done
-    for r in "$@"; do traj fcnf100_test trust "$r" 100; done
-    check fcnf100_test "$1" 40 25 prune_q20,prune_q30,prune_q50,delegate,tr_q20_d5,tr_q50_d20
+    trust fcnf100_test tagcn_k3_seed0 100 25
+    traj fcnf100_test trust tagcn_k3_seed0 100
+    trust fcnf100_test tagcn_k3_seed0 100 120 q50_d20 decode_tr120
+    check fcnf100_test tagcn_k3_seed0 40 25 prune_q20,prune_q30,prune_q50,delegate,tr_q20_d5,tr_q50_d20
 fi
 
 if ls "$FAILDIR"/* > /dev/null 2>&1; then
