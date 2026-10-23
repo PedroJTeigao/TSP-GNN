@@ -26,7 +26,7 @@ Instances: directed graphs with k = 4 nearest-neighbour arcs both ways, 20 % sup
 
 Caveats:
 - Some fcnf20 / fcnf50 results were timed with 2 processes instead of 8 (see section 4). Every fcnf100 result used 8.
-- The fcnf100 warm start has 1 seed per encoder until stage C finishes.
+- The fcnf100 warm start has 3 seeds per encoder, and the MILP time is not significantly different (85.3–85.4 s vs 85.4 s).
 
 ## 1. Generator and reference solutions
 
@@ -79,7 +79,7 @@ gap = 100 (cost / reference − 1), mean over the instances (solved ones), mean 
 
 Network inference: fcnf20 0.07 ms, fcnf50 0.11 ms, fcnf100 0.17 ms per instance (batched on the GPU).
 
-Processes in parallel when each result was measured (the reference MILP times: 8): **2**: 17 results (fcnf20/baselines/baselines, fcnf50/baselines/baselines, fcnf20/gcn_seed0/guided, fcnf20/gcn_seed0/warm, fcnf50/gcn_seed0/guided, fcnf20/gcn_seed1/guided, fcnf20/gcn_seed1/warm, fcnf50/gcn_seed1/guided, fcnf20/gcn_seed2/guided, fcnf20/gcn_seed2/warm, fcnf50/gcn_seed2/guided, fcnf20/tagcn_k3_seed0/guided, …); **8**: 18 results (fcnf100/baselines/baselines, fcnf100/gcn_seed0/guided, fcnf100/gcn_seed0/warm, fcnf50/gcn_seed0/warm, fcnf100/gcn_seed1/guided, fcnf50/gcn_seed1/warm, fcnf100/gcn_seed2/guided, fcnf50/gcn_seed2/warm, fcnf100/tagcn_k3_seed0/guided, fcnf100/tagcn_k3_seed0/warm, fcnf50/tagcn_k3_seed0/guided, fcnf50/tagcn_k3_seed0/warm, …). Fewer processes means less contention, so times measured with 2 are slightly favourable to the method.
+Processes in parallel when each result was measured (the reference MILP times: 8): **2**: 17 results (fcnf20/baselines/baselines, fcnf50/baselines/baselines, fcnf20/gcn_seed0/guided, fcnf20/gcn_seed0/warm, fcnf50/gcn_seed0/guided, fcnf20/gcn_seed1/guided, fcnf20/gcn_seed1/warm, fcnf50/gcn_seed1/guided, fcnf20/gcn_seed2/guided, fcnf20/gcn_seed2/warm, fcnf50/gcn_seed2/guided, fcnf20/tagcn_k3_seed0/guided, …); **8**: 22 results (fcnf100/baselines/baselines, fcnf100/gcn_seed0/guided, fcnf100/gcn_seed0/warm, fcnf50/gcn_seed0/warm, fcnf100/gcn_seed1/guided, fcnf100/gcn_seed1/warm, fcnf50/gcn_seed1/warm, fcnf100/gcn_seed2/guided, fcnf100/gcn_seed2/warm, fcnf50/gcn_seed2/warm, fcnf100/tagcn_k3_seed0/guided, fcnf100/tagcn_k3_seed0/warm, …). Fewer processes means less contention, so times measured with 2 are slightly favourable to the method.
 
 ### fcnf20 (reference: MILP optimum (all proven))
 
@@ -139,8 +139,8 @@ Processes in parallel when each result was measured (the reference MILP times: 8
 | Pruning q = 30 % | TAGCN K=3 | 6.70 ± 0.81 | 24.15 ± 1.33 | 1 ± 1 | 0.61 ± 0.02 | 100 ± 0 |
 | Pruning q = 50 % | GCN | 6.53 ± 0.36 | 27.43 ± 1.40 | 32 ± 5 | 0.65 ± 0.01 | 100 ± 0 |
 | Pruning q = 50 % | TAGCN K=3 | 5.89 ± 0.50 | 26.39 ± 0.90 | 40 ± 5 | 0.63 ± 0.01 | 100 ± 0 |
-| Warm start (full MILP) | GCN (1 seed) | 0.15 | 85.37 | 0 | 1.00 | 100 |
-| Warm start (full MILP) | TAGCN K=3 (1 seed) | 0.15 | 85.24 | 0 | 1.00 | 100 |
+| Warm start (full MILP) | GCN | 0.15 ± 0.00 | 85.29 ± 0.07 | 0 ± 0 | 1.00 ± 0.00 | 100 ± 0 |
+| Warm start (full MILP) | TAGCN K=3 | 0.15 ± 0.00 | 85.39 ± 0.13 | 0 ± 0 | 1.00 ± 0.00 | 100 ± 0 |
 | Delegation (slope scaling + MILP on 30 % nodes) | GCN | 9.27 ± 0.26 | 1.73 ± 0.06 | 100 ± 0 | 0.47 ± 0.00 | 100 ± 0 |
 | Delegation (slope scaling + MILP on 30 % nodes) | TAGCN K=3 | 9.20 ± 0.22 | 1.83 ± 0.12 | 100 ± 0 | 0.47 ± 0.00 | 100 ± 0 |
 
@@ -235,8 +235,8 @@ Wilcoxon signed-rank per instance, one test per seed, p = max over seeds (a base
 | GCN pruning q30 vs MILP | seconds | -58.598 | 90 / 0 / 10 | 7.1e-31 | 3 | better |
 | GCN pruning q50 vs MILP | gap | +6.378 | 3 / 10 / 87 | 4.2e-30 | 3 | worse |
 | GCN pruning q50 vs MILP | seconds | -57.996 | 90 / 0 / 10 | 2.6e-31 | 3 | better |
-| GCN warm start vs MILP | gap | -0.002 | 1 / 98 / 0 | 7.5e-01 | 1 | n.s. |
-| GCN warm start vs MILP | seconds | -0.055 | 36 / 0 / 64 | 2.3e-01 | 1 | n.s. |
+| GCN warm start vs MILP | gap | -0.001 | 1 / 99 / 0 | 1.0e+00 | 3 | n.s. |
+| GCN warm start vs MILP | seconds | -0.139 | 38 / 0 / 62 | 9.0e-01 | 3 | n.s. |
 | GCN delegation vs slope scaling | gap | -7.487 | 100 / 0 / 0 | 1.4e-34 | 3 | better |
 | GCN delegation vs MILP | seconds | -83.704 | 100 / 0 / 0 | 1.4e-34 | 3 | better |
 | GCN delegation vs GCN pruning q20 | gap | +2.333 | 30 / 0 / 70 | 6.4e-06 | 3 | worse |
@@ -251,8 +251,8 @@ Wilcoxon signed-rank per instance, one test per seed, p = max over seeds (a base
 | TAGCN K=3 pruning q30 vs MILP | seconds | -61.284 | 90 / 0 / 10 | 2.0e-31 | 3 | better |
 | TAGCN K=3 pruning q50 vs MILP | gap | +5.743 | 2 / 10 / 87 | 6.7e-30 | 3 | worse |
 | TAGCN K=3 pruning q50 vs MILP | seconds | -59.044 | 91 / 0 / 9 | 6.8e-32 | 3 | better |
-| TAGCN K=3 warm start vs MILP | gap | +0.001 | 1 / 98 / 1 | 1.0e+00 | 1 | n.s. |
-| TAGCN K=3 warm start vs MILP | seconds | -0.185 | 40 / 0 / 60 | 3.1e-01 | 1 | n.s. |
+| TAGCN K=3 warm start vs MILP | gap | +0.002 | 1 / 99 / 1 | 1.0e+00 | 3 | n.s. |
+| TAGCN K=3 warm start vs MILP | seconds | -0.036 | 33 / 0 / 67 | 3.1e-01 | 3 | n.s. |
 | TAGCN K=3 delegation vs slope scaling | gap | -7.557 | 100 / 0 / 0 | 1.4e-34 | 3 | better |
 | TAGCN K=3 delegation vs MILP | seconds | -83.603 | 100 / 0 / 0 | 1.4e-34 | 3 | better |
 | TAGCN K=3 delegation vs TAGCN K=3 pruning q20 | gap | +2.516 | 31 / 0 / 69 | 1.7e-04 | 3 | worse |
@@ -265,7 +265,4 @@ Wilcoxon signed-rank per instance, one test per seed, p = max over seeds (a base
 
 ## Missing results
 
-- `results/phase1_decode/gcn_seed1/fcnf100_test__warm.npz`
-- `results/phase1_decode/gcn_seed2/fcnf100_test__warm.npz`
-- `results/phase1_decode/tagcn_k3_seed1/fcnf100_test__warm.npz`
-- `results/phase1_decode/tagcn_k3_seed2/fcnf100_test__warm.npz`
+None.
