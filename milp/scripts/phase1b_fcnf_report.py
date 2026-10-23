@@ -115,11 +115,11 @@ def decoder_gap(a, method, ref):
 
 def setup_section(data, traj):
     lines = ["## 1. What was run", "",
-             "- **Equal-time baseline**: one run of the full MILP per instance (no warm start; time limit as the "
-             "reference: none on fcnf20, 120 s on fcnf50 / fcnf100) records every improving solution. The MILP "
-             "stopped at time t is read from it, for every decoder and instance (t = the time the decoder used "
-             "there) and for the fixed limits 1, 2, 5, 10, 25 and 50 s. Section 2.3 checks this against runs "
-             "with the time limit itself.",
+             "- **Equal-time baseline**: the full MILP run with time_limit = the time a decoder used on that instance, "
+             "on a sample (tagcn_k3_seed0; 100 instances of fcnf20 / fcnf50, 40 of fcnf100), and read for every "
+             "decoder, seed and instance from one unlimited run per instance that records every improving solution "
+             "(no warm start; limit as the reference: none on fcnf20, 120 s on fcnf50 / fcnf100). The two differ at "
+             "short times (section 2).",
              "- **Trust region** (Han et al. 2023, predict-and-search): the top q % arcs by p are free and at "
              "most Δ of the others may open (Σ y ≤ Δ on them); no repair. TAGCN K=3 (the better encoder of "
              "phase 1): 3 seeds on fcnf20 / fcnf50 with the usual MILP limit; on fcnf100 seed 0 only, the first "
@@ -156,9 +156,18 @@ def milp_curve(t, ref, limits):
 
 def equal_time_section(data, refs, traj, phase1, trust, tr120, checks):
     lines = ["## 2. Decoders vs the full MILP at equal time", "",
+             "**Trajectory vs a run with the time limit.** When HiGHS hits its time limit it often reports one more "
+             "improving solution at that instant (the work in progress, e.g. a heuristic sub-MIP, still returns its "
+             "incumbent; the overshoot of the limit itself is below 2 %). The unlimited run does not show that "
+             "solution at that time, so reading its trajectory overstates the MILP gap at short limits (section 2.4: "
+             "at 1–2 s on fcnf50 / fcnf100 by several points; from 5 s on they agree). The runs with the time "
+             "limit itself are therefore the main comparison (2.2, a sample: tagcn_k3_seed0, the first 100 "
+             "instances of fcnf20 / fcnf50 and 40 of fcnf100); 2.3 has every decoder and seed from the "
+             "trajectory, pessimistic for the MILP at short times.", "",
              "### 2.1 The full MILP stopped at a fixed time", "",
              "Mean gap (%) over the instances that have a solution by then (in brackets: % of instances with a "
-             "solution, when below 100).", "",
+             "solution, when below 100). *run* = runs with the time limit itself (sample of 2.2); *traj.* = read "
+             "from the trajectory (all instances).", "",
              "| set | " + " | ".join(f"{L} s" for L in FIXED) + " | end (limit) |", "|---|" + "---|" * (len(FIXED) + 1)]
     for s in SETS:
         t = traj.get(("none", s))
@@ -167,9 +176,54 @@ def equal_time_section(data, refs, traj, phase1, trust, tr120, checks):
         ref = refs[s][:len(t["seconds"])]
         curve = milp_curve(t, ref, FIXED + (1e9,))
         cells = [f"{g:.2f}" + (f" ({pct:.0f} %)" if pct < 99.95 else "") for g, pct in curve.values()]
-        lines.append(f"| {SETS[s]} | " + " | ".join(cells) + " |")
-    lines += ["", "### 2.2 Each decoder vs the MILP with the decoder's time", "",
-              "Per instance, the MILP gets exactly the time the decoder used there. *MILP no sol.* = % instances "
+        lines.append(f"| {SETS[s]}, traj. ({len(t['seconds'])}) | " + " | ".join(cells) + " |")
+        c = checks.get(s)
+        if c is not None:
+            idx = c["index"].astype(int)
+            cells = []
+            for L in FIXED:
+                key = f"fixed_{L}__cost"
+                g = 100 * (c[key] / refs[s][idx] - 1) if key in c else None
+                cells.append("—" if g is None else f"{np.nanmean(g):.2f}" + (f" ({100 * np.isfinite(g).mean():.0f} %)"
+                                                                            if not np.isfinite(g).all() else ""))
+            lines.append(f"| {SETS[s]}, run ({len(idx)}) | " + " | ".join(cells) + " | — |")
+    lines += ["", "### 2.2 Each decoder vs the MILP run with the decoder's time (sample, the main comparison)", "",
+              "tagcn_k3_seed0 (pruning, delegation, trust region), first instances of each set; per instance the full "
+              "MILP is run with time_limit = the time the decoder used there. Instances where the trust region found "
+              "no solution are left out (*instances*). Wilcoxon signed-rank on the gap; Bonferroni within each size. "
+              "*better* = the decoder has the lower gap.", ""]
+    for s in SETS:
+        c = checks.get(s)
+        if c is None:
+            continue
+        idx = c["index"].astype(int)
+        ref = refs[s][idx]
+        rows = []
+        for m in PHASE1 + TR:
+            a = phase1.get(("tagcn_k3_seed0", s)) if m in PHASE1 else trust.get(("tagcn_k3_seed0", s))
+            if a is None or f"{m}__limit" not in c or f"{m}__cost" not in a:
+                continue
+            g = 100 * (a[f"{m}__cost"][idx] / ref - 1)
+            mg = 100 * (c[f"{m}__cost"] / ref - 1)
+            ok = np.isfinite(g)
+            rows.append((m, g[ok], np.where(np.isfinite(mg), mg, NO_SOLUTION)[ok], c[f"{m}__limit"][ok].mean(),
+                         100 * (~np.isfinite(mg[ok])).mean()))
+        threshold = ALPHA / max(1, len(rows))
+        lines += [f"#### {SETS[s]} ({len(rows)} tests, threshold {threshold:.1e})", "",
+                  "| decoder (TAGCN K=3, seed 0) | instances | s | decoder gap | MILP gap, run with that limit | MILP no sol. (%) "
+                  "| Δ median | better / equal / worse (%) | p | verdict |", "|---|---|---|---|---|---|---|---|---|---|"]
+        for m, g, mg, sec, nosol in rows:
+            if len(g) == 0:
+                continue
+            r = paired([g], [mg], threshold)
+            fin = mg[mg < NO_SOLUTION]
+            lines.append(f"| {LABELS[m]} | {len(g)} | {sec:.2f} | {g.mean():.2f} | {fin.mean() if len(fin) else np.nan:.2f} "
+                         f"| {nosol:.0f} | {r['median_diff']:+.3f} | {r['better']:.0f} / {r['equal']:.0f} / {r['worse']:.0f} "
+                         f"| {r['p_max']:.1e} | {r['verdict']} |")
+        lines.append("")
+    lines += ["### 2.3 Each decoder vs the MILP read from the trajectory (all instances and seeds)", "",
+              "Pessimistic for the MILP at short times (see above); use it for the seeds / encoders the sample does not "
+              "cover. Per instance, the MILP gets exactly the time the decoder used there. *MILP no sol.* = % instances "
               "where the MILP has no solution yet (counted as a decoder win). Wilcoxon signed-rank on the gap, "
               "one test per seed, p = max over seeds; Bonferroni within each size. Δ = median of decoder gap − "
               "MILP gap (% points), averaged over seeds. *better* = the decoder has the lower gap.", ""]
@@ -201,7 +255,7 @@ def equal_time_section(data, refs, traj, phase1, trust, tr120, checks):
                 continue
             rows.append((label, dec, mil, secs, nosol))
         threshold = ALPHA / max(1, len(rows))
-        lines += [f"### {SETS[s]} ({len(rows)} tests, threshold {threshold:.1e})", "",
+        lines += [f"#### {SETS[s]} ({len(rows)} tests, threshold {threshold:.1e})", "",
                   "| decoder | instances | s | decoder gap | MILP gap at that time | MILP no sol. (%) | Δ median "
                   "| better / equal / worse (%) | p max | seeds | verdict |", "|---|---|---|---|---|---|---|---|---|---|---|"]
         for label, dec, mil, secs, nosol in rows:
@@ -211,11 +265,11 @@ def equal_time_section(data, refs, traj, phase1, trust, tr120, checks):
                          f"| {fmt(nosol, 0)} | {r['median_diff']:+.3f} | {r['better']:.0f} / {r['equal']:.0f} / "
                          f"{r['worse']:.0f} | {r['p_max']:.1e} | {r['seeds']} | {r['verdict']} |")
         lines.append("")
-    lines += ["### 2.3 Check: trajectory vs a run with the time limit itself", "",
+    lines += ["### 2.4 Check: trajectory vs a run with the time limit itself", "",
               "tagcn_k3_seed0, first instances of each set: the MILP re-run with time_limit = the decoder's time "
-              "(or the fixed limit) against the cost read from the trajectory. The two differ only by timing noise "
-              "(an improving solution found near the limit can fall on either side). *same* = equal cost "
-              "(rel. 1e-6); p = Wilcoxon on the gap, run vs trajectory.", "",
+              "(or the fixed limit) against the cost read from the trajectory. Besides timing noise, the run with the "
+              "limit gains the solution HiGHS reports when it stops (see above), so it is better at short limits. "
+              "*same* = equal cost (rel. 1e-6); p = Wilcoxon on the gap, run vs trajectory.", "",
               "| set | limit | instances | gap, run with the limit | gap, trajectory | no sol. run / traj. | same (%) | p |",
               "|---|---|---|---|---|---|---|---|"]
     for s in SETS:
@@ -370,7 +424,7 @@ def warm_section(refs, traj):
     return lines
 
 
-def figure(refs, traj, phase1, trust, tr120, out_path):
+def figure(refs, traj, phase1, trust, tr120, checks, out_path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -388,10 +442,18 @@ def figure(refs, traj, phase1, trust, tr120, out_path):
         grid = np.logspace(-2.5, np.log10(max(t["seconds"].max(), 1.0)), 60)
         curve = milp_curve(t, ref, grid)
         xs = [L for L, (g, pct) in curve.items() if pct >= 99]           # only where (almost) every instance has one
-        ax.plot(xs, [curve[L][0] for L in xs], color=colors["milp"], lw=1.6, label="Full MILP stopped at t", zorder=2)
+        ax.plot(xs, [curve[L][0] for L in xs], color=colors["milp"], lw=1.6, label="Full MILP at t (trajectory)", zorder=2)
         fixed = milp_curve(t, ref, [L for L in FIXED if L <= max(t["seconds"].max(), 1.0)])
         fx = [L for L, (g, pct) in fixed.items() if pct >= 99]
-        ax.scatter(fx, [fixed[L][0] for L in fx], color=colors["milp"], s=22, zorder=3, label="MILP at 1, 2, 5, 10, 25, 50 s")
+        ax.scatter(fx, [fixed[L][0] for L in fx], color=colors["milp"], s=22, zorder=3,
+                   label="MILP at 1, 2, 5, 10, 25, 50 s (trajectory)")
+        c = checks.get(s)
+        if c is not None:                                 # the same limits, run with the limit itself (sample)
+            idx = c["index"].astype(int)
+            pts = [(L, np.nanmean(100 * (c[f"fixed_{L}__cost"] / refs[s][idx] - 1))) for L in FIXED if f"fixed_{L}__cost" in c]
+            pts = [(L, g) for L, g in pts if L <= max(t["seconds"].max(), 1.0)]
+            ax.scatter([L for L, _ in pts], [g for _, g in pts], s=46, facecolors="none", edgecolors=colors["milp"],
+                       linewidths=1.4, zorder=3, label="MILP run with that limit (sample)")
         for enc, marker in (("gcn", "o"), ("tagcn_k3", "^")):
             for m in PHASE1:
                 arr = [phase1.get((f"{enc}_seed{k}", s)) for k in SEEDS]
@@ -457,7 +519,7 @@ def main():
     lines += equal_time_section(data, refs, traj, phase1, trust, tr120, checks)
     lines += trust_section(data, refs, phase1, trust, tr120)
     lines += warm_section(refs, traj)
-    if figure(refs, traj, phase1, trust, tr120, args.fig):
+    if figure(refs, traj, phase1, trust, tr120, checks, args.fig):
         lines += ["## 5. Figure", "", f"![Gap vs time]({os.path.relpath(args.fig, os.path.dirname(args.out))})", ""]
     lines += ["## Missing results", ""] + ([f"- `{m}`" for m in missing] if missing else ["None."])
     with open(args.out, "w") as f:
