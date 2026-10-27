@@ -4,11 +4,15 @@ Nothing is retrained. For each instance of --data:
     1) k-NN graph with a KD-tree (scale.knn_graph); k from --k-mode:
          k50        k = 50 (never more than n-1)
          khalf100   k = min(round(0.5 n), 100)
+         khalf      k = round(0.5 n) (uncapped)
+         k02n       k = round(0.2 n) (Joshi et al. 2021, "fixed diameter" 20 %)
+         k10        k = 10 (the training graphs of TSP-20)
     2) the network, one instance at a time (GPU; CPU if it does not fit in the 5.5 GiB cap)
     3) decoding with the sparse decoders (same tours as the dense ones, see tests/test_scale.py):
          greedy always; beam B=10 if n <= --beam10-max-n; beam B=100 if n is in --beam100-n
     4) 2-opt with neighbour lists (the same k neighbours), applied to each decoder's tour, stopped
        after --two-opt-limit seconds (then the "+2opt" gap is NaN and the timeout is recorded).
+       With --two-opt-k-mode the 2-opt lists use that k-mode instead (to compare graphs with the same 2-opt).
 Steps 3-4 run in --workers CPU processes while the GPU computes the next model.
 
 Writes, for each run, results/phase2_scale/<run>/<k-mode>/<dataset>.json (summary) and .npz
@@ -33,15 +37,17 @@ from torch_geometric.data import Data
 from tsp_gnn.data import load_dataset, tour_length
 from tsp_gnn.decode import optimality_gap, verify_tour
 from tsp_gnn.models import build_model
-from tsp_gnn.scale import beam_search_sparse, edge_pairs, greedy_sparse, knn_graph, two_opt_neighbors
+from tsp_gnn.scale import (beam_search_sparse, edge_pairs, greedy_sparse, knn_graph, neighbor_lists,
+                           two_opt_neighbors)
 from tsp_gnn.utils import git_info, limit_gpu_memory
 
-K_MODES = ("k50", "khalf100")
+K_MODES = ("k50", "khalf100", "khalf", "k02n", "k10")
 
 
 def k_of(mode, n):
     """Number of neighbours of the test graph for a k-mode (never more than n-1)."""
-    k = 50 if mode == "k50" else min(round(0.5 * n), 100)
+    k = {"k50": 50, "khalf100": min(round(0.5 * n), 100), "khalf": round(0.5 * n), "k02n": round(0.2 * n),
+         "k10": 10}[mode]
     return min(k, n - 1)
 
 
@@ -123,12 +129,15 @@ def main():
     parser.add_argument("--beam10-max-n", type=int, default=1000)
     parser.add_argument("--beam100-n", type=int, nargs="*", default=[200])
     parser.add_argument("--two-opt-limit", type=float, default=600.0, help="seconds per 2-opt call")
+    parser.add_argument("--two-opt-k-mode", choices=K_MODES, default=None,
+                        help="k-mode of the 2-opt neighbour lists (default: --k-mode)")
     args = parser.parse_args()
 
     name = os.path.splitext(os.path.basename(args.data))[0]
     d = load_dataset(args.data)
     n, num = int(d["coords"].shape[1]), len(d["coords"])
     k = k_of(args.k_mode, n)
+    k2 = k_of(args.two_opt_k_mode, n) if args.two_opt_k_mode else k
     widths = ([10] if n <= args.beam10_max_n else []) + ([100] if n in args.beam100_n else [])
     todo = [r for r in args.runs if not os.path.exists(os.path.join(args.out_root, r, args.k_mode, f"{name}.json"))]
     print(f"{name}: n = {n}, {num} instances, k = {k} ({args.k_mode}), beam widths {widths}, "
@@ -142,6 +151,8 @@ def main():
         start = time.perf_counter()
         g, nb = knn_graph(c, k, return_lists=True)
         graph_ms.append(1000 * (time.perf_counter() - start))
+        if k2 != k:
+            nb = neighbor_lists(torch.as_tensor(c, dtype=torch.float32).double().numpy(), k2)   # as knn_graph
         graphs.append(g); lists.append(nb)
     graph_ms = np.array(graph_ms)
     coords = [g.x.numpy().astype(np.float64) for g in graphs]   # as in the phase 1 decoders
@@ -177,7 +188,7 @@ def main():
             summary = {"meta": {"git_commit": commit, "git_dirty": dirty, "date": datetime.date.today().isoformat(),
                                 "run": run, "checkpoint": args.checkpoint, "epoch": epoch, "model": cfg["model"],
                                 "dataset": name, "n": n, "num": num, "k_mode": args.k_mode, "k": k,
-                                "beam_widths": widths, "two_opt": "neighbour lists (k), don't-look bits",
+                                "beam_widths": widths, "two_opt": "neighbour lists (k), don't-look bits", "two_opt_k": k2,
                                 "two_opt_limit_s": args.two_opt_limit, "gnn_device": used, "peak_gpu_gib": peak,
                                 "graph_ms_mean": float(graph_ms.mean()), "gnn_ms_mean": float(gnn_ms.mean())}}
             for m in methods:
