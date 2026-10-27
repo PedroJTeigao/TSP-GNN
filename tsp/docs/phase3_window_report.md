@@ -175,3 +175,6 @@ One CPU process per solver/seed (5 in parallel), network on the GPU in batches.
 ## Missing results
 
 None.
+
+---
+**Note added 2026-10-27 (phase 3 benchmark, E0).** The references of tsp1000_test and tsp10000_test were recomputed with the stand-alone LKH-3.0.6 binary (1k: RUNS = 10; 10k: RUNS = 5, TIME_LIMIT = 696 s per run): tsp1000_test is unchanged (0.000 %) and tsp10000_test is 0.0003 % shorter on average, so the gaps above stand. Comparison with LKH-3 at equal time and with the literature: `phase3_benchmark_report.md`.

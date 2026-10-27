@@ -441,8 +441,10 @@ def plot_pareto(R, figs_dir):
             ax.plot([np.mean(p["s"]) for p in p2], [np.mean(p["gap"]) for p in p2], "-o", color=COLORS["ours"],
                     linewidth=2, markersize=7, label="Ours: triage (LKH on top 10–50 % disagreement)", zorder=4)
             for q, p in zip(P2_TOP, p2):
-                ax.annotate(f"{q} %", (np.mean(p["s"]), np.mean(p["gap"])), textcoords="offset points",
-                            xytext=(5, 5), fontsize=7, color=INK)
+                if q in (P2_TOP[0], P2_TOP[-1]):          # only the ends of the curve: the points are close
+                    ax.annotate(f"{q} %", (np.mean(p["s"]), np.mean(p["gap"])), textcoords="offset points",
+                                xytext=(0, -13 if q == P2_TOP[0] else 7), fontsize=7, color=INK,
+                                ha="center")
         for method, marker, label in (("beam10_w20", "P", "Ours: model windows, beam B = 10"),
                                       ("P1", "X", "Ours: LKH on all windows")):
             p = our_point(R, name, method)
@@ -456,8 +458,9 @@ def plot_pareto(R, figs_dir):
                 linestyle="none", label="Published: not reproduced, different hardware and reference", zorder=3,
                 markeredgecolor="white")
         for p in pub:
-            ax.annotate(p["short"], (p[key_t], p[key_g]), textcoords="offset points", xytext=(6, -3), fontsize=7,
-                        color=MUTED)
+            below = n == 1000 and p["short"] == "GLOP"      # above it sits our triage curve
+            ax.annotate(p["short"], (p[key_t], p[key_g]), textcoords="offset points", xytext=(0, -13 if below else 7),
+                        fontsize=7, color=MUTED, ha="center")
         ax.set_xscale("log")
         ax.set_yscale("log")
         for axis in (ax.xaxis, ax.yaxis):
