@@ -11,6 +11,12 @@ Variants:
     alpha_p<k>         ALPHA with INITIAL_PERIOD = k (shorter subgradient ascent)
     popmusic           CANDIDATE_SET_TYPE = POPMUSIC
     nn5, nn8           CANDIDATE_SET_TYPE = NEAREST-NEIGHBOR, MAX_CANDIDATES = 5 / 8
+    alpha_nosub        ALPHA with SUBGRADIENT = NO (alpha-nearness on the plain minimum 1-tree, no ascent)
+    quadrant5, 8       CANDIDATE_SET_TYPE = QUADRANT, MAX_CANDIDATES = 5 / 8
+    heat5, heat8       the 5 / 8 edges of highest p of the network for each city (heatcand.py), read from a
+                       CANDIDATE_FILE with CANDIDATE_SET_TYPE = NEAREST-NEIGHBOR (no ascent); the k-NN graph
+                       and the network (TAGCN K=3 seed 0, best.pt, k = min(0.5 n, 100)) are part of the fixed
+                       cost (net_seconds); the CUDA warm-up is not
 The time of our greedy + 2-opt tour is measured too: a variant with INITIAL_TOUR_FILE must pay it as well.
 
 Example (1 process, to leave the CPU to E0):
@@ -25,7 +31,7 @@ import time
 
 import numpy as np
 
-from tsp_gnn import lkh3
+from tsp_gnn import heatcand, lkh3
 from tsp_gnn.data import load_dataset, tour_length
 from tsp_gnn.window import initial_tour
 
@@ -38,7 +44,15 @@ def variants(n):
     out["popmusic"] = {"CANDIDATE_SET_TYPE": "POPMUSIC"}
     out["nn5"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 5}
     out["nn8"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 8}
+    out["alpha_nosub"] = {"SUBGRADIENT": "NO"}
+    out["quadrant5"] = {"CANDIDATE_SET_TYPE": "QUADRANT", "MAX_CANDIDATES": 5}
+    out["quadrant8"] = {"CANDIDATE_SET_TYPE": "QUADRANT", "MAX_CANDIDATES": 8}
+    out["heat5"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 5}
+    out["heat8"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 8}
     return out
+
+
+HEAT_RUN = "tagcn_k3_seed0"
 
 
 def main():
@@ -46,6 +60,7 @@ def main():
     parser.add_argument("--data", required=True)
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--only", nargs="*", default=None, help="variants to run (default: all)")
     args = parser.parse_args()
     if os.path.exists(args.out):
         raise SystemExit(f"{args.out} already exists: not overwritten")
@@ -64,16 +79,26 @@ def main():
 
     records = {"data": args.data, "index": args.index, "n": n, "greedy_2opt_seconds": init_seconds,
                "greedy_2opt_gap_pct": init_gap, "variants": []}
-    for name, params in variants(n).items():
+    todo = {v: p for v, p in variants(n).items() if args.only is None or v in args.only}
+    if any(v.startswith("heat") for v in todo):
+        model, device = heatcand.load_model(HEAT_RUN)
+        heatcand.instance_heatmap(model, device, coords, k)          # warm-up (CUDA kernels), not timed
+    for name, params in todo.items():
         for with_init in (False, True):
+            candidates, net_seconds = None, 0.0
+            if name.startswith("heat"):
+                start = time.perf_counter()
+                pi, pj, prob, _, _ = heatcand.instance_heatmap(model, device, coords, k)
+                candidates = heatcand.top_candidates(pi, pj, prob, n, params["MAX_CANDIDATES"])
+                net_seconds = time.perf_counter() - start         # graph + network + top-c selection
             r = lkh3.solve(coords, workdir, {"RUNS": 1, "MAX_TRIALS": 1, **params},
-                           initial_tour=t0 if with_init else None)
+                           initial_tour=t0 if with_init else None, candidates=candidates)
             ascent = re.search(r"Ascent time = ([\d.]+) sec", r["log"])
             rec = {"variant": name, "params": params, "initial_tour_file": with_init,
                    "wall_seconds": r["wall_seconds"], "preprocessing_seconds": r["preprocessing_seconds"],
                    "ascent_seconds": float(ascent.group(1)) if ascent else 0.0,
-                   "trial_seconds": r["search_seconds"],
-                   "fixed_seconds": r["wall_seconds"] - r["search_seconds"],
+                   "trial_seconds": r["search_seconds"], "net_seconds": net_seconds,
+                   "fixed_seconds": net_seconds + r["wall_seconds"] - r["search_seconds"],
                    "one_trial_gap_pct": 100 * (r["length"] / stored - 1)}
             records["variants"].append(rec)
             print(f"  {name:<12} init={'ours' if with_init else 'LKH ':<4}  wall {rec['wall_seconds']:7.2f} s  "

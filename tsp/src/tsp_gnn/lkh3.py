@@ -68,11 +68,14 @@ def parse_output(text):
     }
 
 
-def solve(coords, workdir, params=None, initial_tour=None, timeout=None):
+def solve(coords, workdir, params=None, initial_tour=None, timeout=None, candidates=None):
     """Run LKH on one instance inside workdir (created if needed; its files are overwritten, never removed).
 
     params: extra LKH parameters as {"KEY": value}, e.g. {"RUNS": 1, "TIME_LIMIT": 8.4}.
     initial_tour: (n,) tour written to a file and passed as INITIAL_TOUR_FILE.
+    candidates: (cand, alpha), both (n, c), written by heatcand.write_candidates and passed as
+        CANDIDATE_FILE (use CANDIDATE_SET_TYPE = NEAREST-NEIGHBOR or QUADRANT: with ALPHA, LKH still runs
+        the subgradient ascent after reading the file).
     timeout: hard wall-clock limit for the process (seconds); if it is hit, there is no tour.
     Returns a dict: tour, length (float), wall_seconds, preprocessing_seconds, search_seconds,
     run_costs, run_seconds, timed_out, log (LKH's output).
@@ -80,6 +83,7 @@ def solve(coords, workdir, params=None, initial_tour=None, timeout=None):
     os.makedirs(workdir, exist_ok=True)
     problem, par = os.path.join(workdir, "problem.tsp"), os.path.join(workdir, "run.par")
     out_tour, init = os.path.join(workdir, "best.tour"), os.path.join(workdir, "initial.tour")
+    cand_file = os.path.join(workdir, "heat.cand")
     n = len(coords)
     # The files of workdir are overwritten on every call: a tour file whose (ns) modification time did not
     # change was left by an earlier call, not written by this one.
@@ -90,6 +94,10 @@ def solve(coords, workdir, params=None, initial_tour=None, timeout=None):
     if initial_tour is not None:
         write_tour(init, initial_tour)
         lines.append(f"INITIAL_TOUR_FILE = {init}")
+    if candidates is not None:
+        from tsp_gnn.heatcand import write_candidates
+        write_candidates(cand_file, *candidates)
+        lines.append(f"CANDIDATE_FILE = {cand_file}")
     lines += [f"{k} = {v}" for k, v in (params or {}).items()]
     with open(par, "w") as f:
         f.write("\n".join(lines) + "\n")
