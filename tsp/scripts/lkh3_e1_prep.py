@@ -49,10 +49,13 @@ def variants(n):
     out["quadrant8"] = {"CANDIDATE_SET_TYPE": "QUADRANT", "MAX_CANDIDATES": 8}
     out["heat5"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 5}
     out["heat8"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 8}
+    # Union of nn5 and heat5 (up to 10 per city), used by lkh3_equal_time.py only (not probed here).
+    out["nnheat5"] = {"CANDIDATE_SET_TYPE": "NEAREST-NEIGHBOR", "MAX_CANDIDATES": 10}
     return out
 
 
 HEAT_RUN = "tagcn_k3_seed0"
+NET_VARIANTS = ("heat5", "heat8", "nnheat5")     # variants whose candidates come from the network
 
 
 def main():
@@ -79,7 +82,8 @@ def main():
 
     records = {"data": args.data, "index": args.index, "n": n, "greedy_2opt_seconds": init_seconds,
                "greedy_2opt_gap_pct": init_gap, "variants": []}
-    todo = {v: p for v, p in variants(n).items() if args.only is None or v in args.only}
+    todo = {v: p for v, p in variants(n).items()
+            if v != "nnheat5" and (args.only is None or v in args.only)}
     if any(v.startswith("heat") for v in todo):
         model, device = heatcand.load_model(HEAT_RUN)
         heatcand.instance_heatmap(model, device, coords, k)          # warm-up (CUDA kernels), not timed

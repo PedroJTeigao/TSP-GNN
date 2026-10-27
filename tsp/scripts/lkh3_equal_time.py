@@ -9,7 +9,9 @@ and at least 0.01 s (TIME_LIMIT = 0 crashes LKH-3.0.6). TIME_LIMIT is checked be
 real time can exceed B: what is recorded and compared is the real total time:
     total_seconds = LKH wall-clock + greedy + 2-opt (if used) + graph + network (if used)
 A (variant, start, budget) whose measured fixed cost + one trial already exceeds B is not run ("does not
-fit"); its fields are NaN.
+fit"); its fields are NaN. The hybrid nnheat5 (union of the 5 nearest neighbours and the 5 edges of highest
+p, up to 10 candidates per city, ordered by distance) was not probed: its fixed cost is estimated from heat5
+and its trial time from the slower of nn8 / heat8 (see fixed_costs).
 
 Per run also: LKH preprocessing and search times, the number of trials done, the cost after the first trial
 (the gap after one trial is computed by the report) and the final float length.
@@ -33,9 +35,10 @@ import numpy as np
 
 from tsp_gnn import heatcand, lkh3
 from tsp_gnn.data import SCALE, load_dataset
+from tsp_gnn.scale import neighbor_lists
 from tsp_gnn.utils import git_info
 from tsp_gnn.window import initial_tour
-from lkh3_e1_prep import HEAT_RUN, variants
+from lkh3_e1_prep import HEAT_RUN, NET_VARIANTS, variants
 
 MAX_PROCS = 8
 MIN_TIME_LIMIT = 0.01
@@ -61,6 +64,14 @@ def fixed_costs(prep_files):
             greedy = rec["greedy_2opt_seconds"] if v["initial_tour_file"] else 0.0
             out[(v["variant"], v["initial_tour_file"])] = (lkh_fixed, v["trial_seconds"],
                                                            lkh_fixed + v["trial_seconds"] + net + greedy)
+    # Hybrid nnheat5 (not probed): LKH fixed cost and network of heat5, one trial as the slower of nn8 /
+    # heat8 (up to 10 candidates per city). An estimate, used only for TIME_LIMIT and the "fits" check.
+    for ours in (False, True):
+        if all((v, ours) in out for v in ("heat5", "heat8", "nn8")):
+            lkh_fixed, _, total5 = out[("heat5", ours)]
+            trial5 = out[("heat5", ours)][1]
+            trial = max(out[("nn8", ours)][1], out[("heat8", ours)][1])
+            out[("nnheat5", ours)] = (lkh_fixed, trial, total5 - trial5 + trial)
     return out
 
 
@@ -116,7 +127,7 @@ def main():
     # The pool is created before CUDA starts (as in scale_eval.py): the workers only use the CPU.
     pool = Pool(min(args.procs, MAX_PROCS))
     model = device = None
-    if any(v.startswith("heat") for v in names):
+    if any(v in NET_VARIANTS for v in names):
         model, device = heatcand.load_model(HEAT_RUN)
         heatcand.instance_heatmap(model, device, d["coords"][0].astype(np.float64), k)   # warm-up, not timed
 
@@ -126,20 +137,28 @@ def main():
         start = time.perf_counter()
         t0 = initial_tour(coords, k)
         greedy_s = time.perf_counter() - start
-        heat, net_s = {}, 0.0
+        # Graph + network once per instance (shared), then each variant's own selection, timed separately.
+        heat, own_s, net_s = {}, {}, 0.0
         if model is not None:
             start = time.perf_counter()
             pi, pj, prob, _, _ = heatcand.instance_heatmap(model, device, coords, k)
-            for v in names:
-                if v.startswith("heat"):
-                    heat[v] = heatcand.top_candidates(pi, pj, prob, n, all_variants[v]["MAX_CANDIDATES"])
             net_s = time.perf_counter() - start
+            for v in names:
+                if v not in NET_VARIANTS:
+                    continue
+                start = time.perf_counter()
+                if v == "nnheat5":
+                    top5, _ = heatcand.top_candidates(pi, pj, prob, n, 5)
+                    heat[v] = heatcand.hybrid_candidates(coords, top5, neighbor_lists(coords, 5))
+                else:
+                    heat[v] = heatcand.top_candidates(pi, pj, prob, n, all_variants[v]["MAX_CANDIDATES"])
+                own_s[v] = time.perf_counter() - start
         prep["greedy_seconds"].append(greedy_s)
         prep["net_seconds"].append(net_s)
         for c, ((v, ours, b), ok) in enumerate(zip(configs, fits)):
             if not ok:
                 continue
-            extra = (greedy_s if ours else 0.0) + (net_s if v in heat else 0.0)
+            extra = (greedy_s if ours else 0.0) + (net_s + own_s[v] if v in heat else 0.0)
             limit = max(MIN_TIME_LIMIT, b - costs[(v, ours)][0] - extra)
             jobs.append((i, c, coords, all_variants[v], t0 if ours else None, heat.get(v), limit, extra,
                          os.path.join(args.out_root, f"{name}_work")))

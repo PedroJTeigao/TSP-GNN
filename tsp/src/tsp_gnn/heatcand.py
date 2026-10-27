@@ -62,7 +62,10 @@ def top_candidates(pi, pj, prob, n, c):
 
 
 def write_candidates(path, cand, alpha):
-    """LKH CANDIDATE_FILE: n, then "city dad count (to alpha)*" per city (1-indexed; dad 0 = none), -1, EOF."""
+    """LKH CANDIDATE_FILE: n, then "city dad count (to alpha)*" per city (1-indexed; dad 0 = none), -1, EOF.
+
+    cand, alpha: (n, c) arrays, or lists of n arrays when the number of candidates varies per city.
+    """
     n = len(cand)
     with open(path, "w") as f:
         f.write(f"{n}\n")
@@ -70,3 +73,20 @@ def write_candidates(path, cand, alpha):
             pairs = " ".join(f"{int(t) + 1} {int(a)}" for t, a in zip(cand[i], alpha[i]))
             f.write(f"{i + 1} 0 {len(cand[i])} {pairs}\n")
         f.write("-1\nEOF\n")
+
+
+def hybrid_candidates(coords, heat_cand, nn_cand):
+    """Union of the network's candidates and the nearest neighbours of each city (E1 variant "nnheat5").
+
+    heat_cand, nn_cand: (n, c) arrays. Returns two lists of n arrays (up to 2c candidates per city, no
+    duplicates), ordered by distance; the alphas are the ranks 0, 1, ... in that order (with MAX_CANDIDATES
+    >= 2c nothing is trimmed, the alphas only set the order in which LKH tries the candidates).
+    """
+    cands, alphas = [], []
+    for i in range(len(coords)):
+        union = np.union1d(heat_cand[i], nn_cand[i])
+        union = union[union != i]
+        dist = np.sqrt(((coords[union] - coords[i]) ** 2).sum(axis=1))
+        cands.append(union[np.argsort(dist, kind="stable")])
+        alphas.append(np.arange(len(union), dtype=np.int64))
+    return cands, alphas
