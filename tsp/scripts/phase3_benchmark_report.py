@@ -493,7 +493,11 @@ CAVEATS = """1. **Reference (E0).** Our gaps and LKH-3's are measured against ou
    The 10k file has **no reference tour** (its "tour" is the identity): every 10k gap here is against E0, and the
    published 10k gaps are against each paper's own LKH-3 runs.
 3. **Joshi et al. 2021 use k = 0.2 n** for test-time sparsification; our k = min(0.5 n, 100) neighbours (2-opt
-   lists and the network's k-NN graph) is our own extension. A 0.2 n ablation was not run.
+   lists and the network's k-NN graph) is our own extension. The ablation without retraining
+   (`phase2_k02n_report.md`: TAGCN K=3 and GCN, TSP-50 to TSP-1000, same 2-opt) finds our choice never worse than
+   0.2 n: better with 2-opt at n = 50–100 (by 0.3–0.6 pp) and equal with 2-opt from n = 200 on. In this benchmark the
+   windows always use 20-city graphs; this k only sets the 2-opt lists of the initial tour and the whole-instance
+   graph of E1's heatmap candidates.
 4. **Hardware and timing.** Ours: a shared Intel Xeon E5-2620 v3 (8 cores) under `nice -n 10` and a shared Tesla T4
    capped at 5.5 GiB; published times use 1080Ti to 8× V100, A100 or a 64-thread EPYC, often the network on GPU and
    the search on many cores. Several papers report the time of the whole test set (marked "(set)"; divided by 128 / 16
