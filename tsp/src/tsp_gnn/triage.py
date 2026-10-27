@@ -17,11 +17,14 @@ Policies (one action per window, then the same "replace only if shorter" rule):
     mixed      LKH if disagreement >= dis and confidence < conf,
                else beam path if confidence >= conf, else nothing (P3; confidence needs the beam
                on every window, so its decoding time is paid everywhere)
+E2 ablation (ranked_refine): in each half-pass the top x % of the windows by a score go to LKH, the score
+being random, a simple geometric rule (simple_rule), the disagreement, or the real LKH gain (oracle).
 """
 
 import time
 
 import numpy as np
+from scipy.spatial import cKDTree
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
 from tsp_gnn.hier import beam_path
@@ -173,6 +176,102 @@ def triage_refine(coords, tour, w, policy, heatmaps=None, max_passes=3, beam_wid
                     stats["ms_lkh"] += 1000 * (time.perf_counter() - start)
                 if order is None:
                     continue
+                old, new = path_length(pts), path_length(pts[order])
+                if new < old - IMPROVE_TOL:
+                    t[i] = t[i][order]
+                    stats["improved"] += 1
+                    pass_gain += old - new
+        stats["gain"] += pass_gain
+        if pass_gain <= 0:
+            break
+    return t, stats
+
+
+# ---------------------------------------------------------------- E2 ablation: which windows go to LKH
+
+RANKED_SCORES = ("random", "simple", "disagreement", "oracle")
+
+
+def nn_distances(coords):
+    """Distance from each city to its nearest other city (KD-tree)."""
+    dist, _ = cKDTree(coords).query(coords, k=2)
+    return dist[:, 1]
+
+
+def simple_rule(pts, nn_dist):
+    """Length of the segment / sum of the nearest-neighbour distances of its cities (no model).
+
+    A segment whose edges are long compared with the local spacing of its cities is likely to be improvable.
+    pts: the window's cities in current order; nn_dist: their nearest-neighbour distances in the instance.
+    """
+    return path_length(pts) / max(float(np.sum(nn_dist)), 1e-12)
+
+
+def top_fraction(scores, frac):
+    """Mask of the round(frac × len) highest scores (at least one); ties broken by position (stable)."""
+    scores = np.asarray(scores, dtype=float)
+    k = max(1, int(round(frac * len(scores))))
+    order = np.argsort(-scores, kind="stable")
+    mask = np.zeros(len(scores), dtype=bool)
+    mask[order[:k]] = True
+    return mask
+
+
+def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3):
+    """Window refinement where, in each half-pass, the top `frac` of the windows by `score` go to LKH and the
+    others are left as they are. All policies thus send the same number of windows to LKH.
+
+    score: "random" (uniform, from rng), "simple" (simple_rule), "disagreement" (segment_disagreement of the
+    network's heatmap) or "oracle" (the real LKH gain of the window, current − LKH path length, as recorded
+    by window_log; LKH runs on every window to know it, so its time is not that of a usable policy).
+    Returns (new tour, stats) as triage_refine, plus ms_score (time to compute the scores, network included).
+    """
+    assert score in RANKED_SCORES
+    t = np.array(tour, dtype=np.int64)
+    n = len(t)
+    stats = {"windows": 0, "to_model": 0, "to_lkh": 0, "improved": 0, "passes": 0, "gain": 0.0,
+             "ms_net": 0.0, "ms_beam": 0.0, "ms_lkh": 0.0, "ms_score": 0.0}
+    nn_dist = None
+    if score == "simple":
+        start = time.perf_counter()
+        nn_dist = nn_distances(coords)
+        stats["ms_score"] += 1000 * (time.perf_counter() - start)
+    for _ in range(max_passes):
+        stats["passes"] += 1
+        pass_gain = 0.0
+        for offset in (0, w // 2):
+            wins = window_starts(n, w, offset)
+            idx = [(s + np.arange(length)) % n for s, length in wins]
+            sets = [coords[t[i]] for i in idx]
+            orders = [None] * len(sets)
+            start = time.perf_counter()
+            if score == "random":
+                values = rng.random(len(sets))
+            elif score == "simple":
+                values = np.array([simple_rule(pts, nn_dist[t[i]]) for i, pts in zip(idx, sets)])
+            elif score == "disagreement":
+                before = heatmaps.seconds
+                heats = heatmaps(sets)
+                stats["ms_net"] += 1000 * (heatmaps.seconds - before)
+                values = np.array([segment_disagreement(h) for h in heats])
+            else:
+                orders = [lkh_path(pts) for pts in sets]
+                values = np.array([path_length(p) - path_length(p[o]) for p, o in zip(sets, orders)])
+            elapsed = 1000 * (time.perf_counter() - start)
+            if score == "oracle":
+                stats["ms_lkh"] += elapsed
+            else:
+                stats["ms_score"] += elapsed
+            chosen = top_fraction(values, frac)
+            for i, pts, order, go in zip(idx, sets, orders, chosen):
+                stats["windows"] += 1
+                if not go:
+                    continue
+                stats["to_lkh"] += 1
+                if order is None:
+                    start = time.perf_counter()
+                    order = lkh_path(pts)
+                    stats["ms_lkh"] += 1000 * (time.perf_counter() - start)
                 old, new = path_length(pts), path_length(pts[order])
                 if new < old - IMPROVE_TOL:
                     t[i] = t[i][order]
