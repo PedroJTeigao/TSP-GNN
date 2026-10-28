@@ -71,7 +71,9 @@ def main():
                                                      seed=0, num_predict=512)
                         obj = llm.extract_json(content)
                         pred, errors = F.validate(obj, n)
-                        if obj is None:
+                        if content is None:
+                            errors = [f"LLM aborted: {raw.get('error', '')[:200]}"]
+                        elif obj is None:
                             errors = ["invalid JSON"]
                         rec.update(seconds=sec, raw=content, prompt_tokens=raw.get("prompt_eval_count"),
                                    eval_tokens=raw.get("eval_count"))

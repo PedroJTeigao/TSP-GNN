@@ -112,7 +112,7 @@ def part_b(rows, keep):
     preds = {n: jl(f"{DATA}/formalize_tsp{n}.jsonl") + jl(f"{DATA}/formalize_b0p_tsp{n}.jsonl") for n in SIZES}
     res = {}
     out += ["| n | text | arm | rules exact (%) | instances exact (%) | answers with schema errors (%) | "
-            "invalid JSON (%) | mean latency (s) |", "|---|---|---|---|---|---|---|---|"]
+            "invalid JSON or aborted answer (%) | mean latency (s) |", "|---|---|---|---|---|---|---|---|"]
     conf = defaultdict(Counter)
     for n in SIZES:
         for text in ("v1", "v2"):
@@ -137,7 +137,8 @@ def part_b(rows, keep):
                 res[(n, text, arm)] = {"rule": rc / rt, "inst": ic / len(ps), "bytype": dict(bytype),
                                        "lat": np.mean([p["seconds"] for p in ps])}
                 err = np.mean([bool(p["errors"]) for p in ps])
-                bad = np.mean([p["errors"] == ["invalid JSON"] for p in ps])
+                bad = np.mean([p["errors"] == ["invalid JSON"] or str(p["errors"][:1]).startswith("['LLM aborted")
+                               for p in ps])
                 out.append(f"| {n} | {TEXT_NAME[text]} | {ARM_NAME[arm]} | {pc(rc / rt)} | {pc(ic / len(ps))} | "
                            f"{pc(err)} | {pc(bad)} | {res[(n, text, arm)]['lat']:.2f} |")
     out += ["", "b3 (API model): not tested, no OPENAI_API_KEY / ANTHROPIC_API_KEY on the server.", "",
@@ -203,6 +204,7 @@ def part_c(rows, keep):
     res, vtypes = {}, defaultdict(Counter)
     for n in SIZES:
         recs = [r for r in jl(f"{DATA}/pipeline_tsp{n}.jsonl") + jl(f"{DATA}/pipeline_b0p_tsp{n}.jsonl")
+                + jl(f"{DATA}/pipeline_rest_tsp{n}.jsonl")
                 if r["idx"] in keep[n]]
         for text in ("v1", "v2"):
             for arm in ARMS + ("oracle",):

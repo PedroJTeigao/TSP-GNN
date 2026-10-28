@@ -88,6 +88,8 @@ def main():
     parser.add_argument("--work", default="data/phase5/work")
     parser.add_argument("--preds", default=None, help="predictions file, default data/phase5/formalize_tsp<n>.jsonl")
     parser.add_argument("--no-oracle", action="store_true", help="only the arms in --preds (no oracle records)")
+    parser.add_argument("--skip-done", default=None,
+                        help="pipeline file(s) already written, comma-separated: (idx, text, arm) found there are skipped")
     args = parser.parse_args()
     n = args.n
     args.time_limit = args.time_limit or (60.0 if n <= 200 else 120.0)
@@ -102,6 +104,10 @@ def main():
     for idx, row in ([] if args.no_oracle else rows.items()):
         for text in ("v1", "v2"):
             preds.append({"idx": idx, "text": text, "arm": "oracle", "pred": label_rules(row)})
+    if args.skip_done:
+        done = {(e["idx"], e["text"], e["arm"]) for path in args.skip_done.split(",") if os.path.exists(path)
+                for e in map(json.loads, open(path))}
+        preds = [p for p in preds if (p["idx"], p["text"], p["arm"]) not in done]
 
     # the rule sets to solve: one job per distinct (instance, rule set) different from the label
     jobs, cases = {}, []
