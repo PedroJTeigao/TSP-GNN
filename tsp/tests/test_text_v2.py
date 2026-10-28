@@ -110,3 +110,36 @@ def test_paraphrase_prompt_lists_generator_phrasings():
     assert R.TEMPLATES["precedence"][0] not in system
     assert T.parse_sentences('{"sentences": ["a", 3, "b"]}') == ["a", "b"]
     assert T.parse_sentences("not json") == []
+
+
+def test_meaning_filters_text_v2b():
+    prec = R.make_rule("precedence", 0, before=50, after=154)
+    ok = ["Visit customer 50 at some point before customer 154.",
+          "Customer 154 should only be visited after you've stopped at customer 50.",
+          "Before customer 154, make sure to stop at customer 50.",
+          "Visit customer 50 first, then customer 154.",
+          "Don't visit customer 154 until customer 50 has been served."]
+    bad = ["Visit customer 154 at some point before customer 50.",                       # inverted
+           "Customer 50 should only be visited after customer 154.",                       # inverted
+           "Customer 154 cannot be the first stop if customer 50 has not been visited yet.",
+           "Customers 50 and 154 are both on the route today."]                            # no order word
+    for t in ok:
+        assert T.check_meaning(t, [prec], {}) is None, t
+    for t in bad:
+        assert T.check_meaning(t, [prec], {}) is not None, t
+    # names, and times that contain the customer's number as decimals (1.50) are not mentions of customer 50
+    assert T.check_meaning("Visit the hospital before customer 154, between 1.50 and 2.50 if you can.",
+                           [prec], {50: "the hospital"}) is None
+    mand = R.make_rule("mandatory_edge", 0, i=3, j=9)
+    assert T.check_meaning("You should visit customer 3 and then customer 9 in either order.", [mand], {}) \
+        == "mandatory_edge: no adjacency word"
+    assert T.check_meaning("Visit customer 3 right before or right after customer 9.", [mand], {}) is None
+    forb = R.make_rule("forbidden_edge", 0, i=3, j=9)
+    assert T.check_meaning("You should not drive from customer 3 to customer 9, or from customer 9 to customer 3.",
+                           [forb], {}) == "forbidden_edge: no adjacency word"
+    for t in ("Customers 3 and 9 must not be visited back-to-back.", "Never go from 3 to 9 in a single step.",
+              "Do not travel directly between customer 3 and customer 9."):
+        assert T.check_meaning(t, [forb], {}) is None, t
+    assert T.check_paraphrase("You should visit customer 3 and then customer 9 in either order.", [mand], {}) is None
+    assert T.check_paraphrase("You should visit customer 3 and then customer 9 in either order.", [mand], {},
+                              strict=True) is not None

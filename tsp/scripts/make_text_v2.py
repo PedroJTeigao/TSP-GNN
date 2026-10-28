@@ -11,7 +11,13 @@ For each instance of data/phase5/text_rules_tsp<n>.jsonl (its formal rules are t
        (with names) and is marked "fallback"; a pair with no accepted merged sentence stays as two sentences.
 Every LLM call is appended to data/phase5/text_v2_calls_tsp<n>.jsonl; a rerun replays it (resume after a stop).
 
-Writes data/phase5/text_rules_v2_tsp<n>.jsonl: per instance text_v1, text_v2, the rules (formal label, binding,
+--strict builds text_v2b (after the manual check of text_v2): the meaning filters of textv2.check_meaning
+(adjacency word for both edge types, order words compatible with the precedence) are added, up to --calls 10
+calls per rule; the cached calls of text_v2 are replayed first (same prompts and seeds), so a sentence that passes
+the strict filters is the same as in text_v2. New calls go to data/phase5/text_v2b_calls_tsp<n>.jsonl. A rule with no
+accepted sentence is left out of text_v2b ("missing") and the instance is marked v2_complete = false.
+
+Writes data/phase5/text_rules_v2_tsp<n>.jsonl (text_rules_v2b_tsp<n>.jsonl with --strict): per instance text_v1, text_v2, the rules (formal label, binding,
 named, v1 text, accepted paraphrases, the sentence used in text_v2 and its source), names, distractors, merged pair.
 
 Example:
@@ -73,7 +79,7 @@ def generate(key, rules, names, cache, log, args, seed0):
             cache[ck] = entry
         for s in T.parse_sentences(content):
             s = s.strip()
-            reason = T.check_paraphrase(s, rules, names)
+            reason = T.check_paraphrase(s, rules, names, strict=args.strict)
             if reason is None and s not in ok:
                 ok.append(s)
             elif reason:
@@ -92,13 +98,16 @@ def with_names(text, names):
 def main():
     parser = argparse.ArgumentParser(description="Build text_v2 (paraphrases, names, distractors) for step-1 data.")
     parser.add_argument("--n", type=int, required=True)
-    parser.add_argument("--calls", type=int, default=4, help="LLM calls per rule at most (2 sentences each)")
+    parser.add_argument("--calls", type=int, default=None,
+                        help="LLM calls per rule at most (2 sentences each); default 4, 10 with --strict")
+    parser.add_argument("--strict", action="store_true", help="text_v2b: add the meaning filters")
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--limit", type=int, default=None, help="first instances only (tests)")
     parser.add_argument("--out", default=None, help="default data/phase5/text_rules_v2_tsp<n>")
     args = parser.parse_args()
     n = args.n
-    out = args.out or f"data/phase5/text_rules_v2_tsp{n}"
+    args.calls = args.calls or (10 if args.strict else 4)
+    out = args.out or f"data/phase5/text_rules_v2{'b' if args.strict else ''}_tsp{n}"
     if os.path.exists(out + ".jsonl"):
         print(f"{out}.jsonl already exists: not overwritten")
         return
@@ -113,13 +122,14 @@ def main():
     multi = [r["idx"] for r in recs if r["num_rules"] + (r["idx"] in extra) >= 2]
     merge = set(int(i) for i in rng.choice(multi, round(MERGE_FRACTION * len(multi)), replace=False))
 
-    calls_path = f"data/phase5/text_v2_calls_tsp{n}.jsonl"
+    calls_path = f"data/phase5/text_v2{'b' if args.strict else ''}_calls_tsp{n}.jsonl"
     cache = {}
-    if os.path.exists(calls_path):
-        for line in open(calls_path):
-            e = json.loads(line)
-            cache[e["key"]] = e
-        print(f"replaying {len(cache)} cached LLM calls")
+    for path in dict.fromkeys([f"data/phase5/text_v2_calls_tsp{n}.jsonl", calls_path]):
+        if os.path.exists(path):
+            for line in open(path):
+                e = json.loads(line)
+                cache[e["key"]] = e
+    print(f"replaying {len(cache)} cached LLM calls")
     commit, dirty = git_info()
     start = time.perf_counter()
     rows = []
@@ -136,6 +146,8 @@ def main():
                 r["v1_text"] = r.pop("text")
                 if ok:
                     r["v2_text"], r["v2_source"] = ok[0], "paraphrase"
+                elif args.strict:
+                    r["v2_text"], r["v2_source"] = None, "missing"
                 else:
                     r["v2_text"], r["v2_source"] = with_names(r["v1_text"], names), "fallback"
             merged_text, merged_rejected = None, {}
@@ -147,7 +159,7 @@ def main():
                     merged_text = ok[0]
                     rules[a]["v2_source"] = rules[b]["v2_source"] = "merged"
             for k, r in enumerate(rules):
-                if r["v2_source"] != "merged":
+                if r["v2_source"] not in ("merged", "missing"):
                     items.append(r["v2_text"])
             if merged_text:
                 items.append(merged_text)
@@ -155,14 +167,15 @@ def main():
             rows.append({"idx": i, "n": n, "rules": rules, "names": {str(c): v for c, v in names.items()},
                          "names_line": p["names_line"], "distractors": p["distractors"],
                          "merged": p["merged"], "merged_text": merged_text, "merged_rejected": merged_rejected,
-                         "extra_window": i in extra, "kind_v2": R.problem_kind(rules),
+                         "extra_window": i in extra,
+                         "v2_complete": all(r["v2_source"] != "missing" for r in rules), "kind_v2": R.problem_kind(rules),
                          "text_v1": p["text_v1"], "text_v2": T.compose_v2(p["names_line"], items, irng),
                          "reference": {k: rec[k] for k in ("kind", "length", "objective", "pure_length")}})
             if len(rows) % 20 == 0 or len(rows) == len(recs):
                 print(f"  {len(rows)}/{len(recs)} instances  ({time.perf_counter() - start:.0f} s)", flush=True)
 
     meta = {"git_commit": commit, "git_dirty": dirty, "date": datetime.date.today().isoformat(), "seed": SEED,
-            "model": llm.MODEL, "temperature": args.temperature, "calls": args.calls,
+            "model": llm.MODEL, "temperature": args.temperature, "calls": args.calls, "strict": args.strict,
             "total_seconds": time.perf_counter() - start}
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out + ".jsonl", "w") as f:

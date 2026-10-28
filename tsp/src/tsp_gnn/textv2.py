@@ -208,8 +208,9 @@ def expected_numbers(rules, names):
     return sorted(out)
 
 
-def check_paraphrase(text, rules, names):
-    """None if text is an acceptable wording of the rules, else the reason it is rejected."""
+def check_paraphrase(text, rules, names, strict=False):
+    """None if text is an acceptable wording of the rules, else the reason it is rejected. strict (text_v2b) adds
+    the meaning filters of check_meaning."""
     if not isinstance(text, str) or len(text.strip()) < 10:
         return "empty"
     t = text.strip()
@@ -236,6 +237,61 @@ def check_paraphrase(text, rules, names):
     for z in R.ZONES:                                   # word start: "northern" counts, "at least" is not "east"
         if bool(re.search(rf"\b{z}", low)) != (z in zones):
             return "zone missing" if z in zones else "other zone mentioned"
+    return check_meaning(t, rules, names) if strict else None
+
+
+# Meaning filters of text_v2b (added after the manual check of text_v2: 15 % of the mandatory-edge paraphrases had
+# lost the adjacency, "visit X and then Y in either order", and one precedence was inverted). Keyword rules only:
+# the 7B is NOT used to translate back (that would favour arms b1 / b2). In a merged sentence each rule is checked
+# against the whole sentence, so an adjacency word of one rule can cover another (weaker there).
+ADJACENT = re.compile(r"right (?:after|before)|immediately|consecutiv|one (?:right )?after (?:the )?other|"
+                      r"next to each other|back[- ]to[- ]back|in a row|adjacent|successive|\bdirect|straight|"
+                      r"single (?:step|move|trip|leg|hop)|next stop|without (?:any )?(?:other )?stops? in between",
+                      re.I)
+BEFORE_WORDS = re.compile(r"\b(?:before|prior to|earlier|sooner|ahead of|then|first|preceding|precede)\b", re.I)
+AFTER_WORDS = re.compile(r"\b(?:after|later|following|follow|until|once)\b", re.I)
+
+
+def _mentions(text, c, names):
+    """Character positions where customer c is mentioned (its name, or its number not part of a decimal)."""
+    if c in names:
+        return [m.start() for m in re.finditer(re.escape(names[c]), text, re.I)]
+    return [m.start() for m in re.finditer(rf"(?<![\d.]){c}(?![\d]|\.\d)", text)]
+
+
+def precedence_direction(text, before, after, names):
+    """None if the order words of text put `before` ahead of `after`, else why not. Accepted patterns:
+    'A ... before/then/first ... B', 'B ... after/until/once ... A', 'before B, ... A', 'after A, ... B'.
+    Rejected: either customer mentioned twice, no order word, or order words of both kinds where it matters."""
+    pa, pb = _mentions(text, before, names), _mentions(text, after, names)
+    if len(pa) != 1 or len(pb) != 1:
+        return "precedence: customer not mentioned exactly once"
+    a, b = pa[0], pb[0]
+    lo, hi = min(a, b), max(a, b)
+    mid = text[lo:hi]
+    has_b, has_a = bool(BEFORE_WORDS.search(mid)), bool(AFTER_WORDS.search(mid))
+    if has_b or has_a:
+        if has_b and has_a:
+            return "precedence: ambiguous order words"
+        ok = (a < b) if has_b else (b < a)
+        return None if ok else "precedence: inverted"
+    head = text[:lo]
+    has_b, has_a = bool(BEFORE_WORDS.search(head)), bool(AFTER_WORDS.search(head))
+    if has_b == has_a:
+        return "precedence: no order word"
+    ok = (b < a) if has_b else (a < b)       # 'before B, A' / 'after A, B'
+    return None if ok else "precedence: inverted"
+
+
+def check_meaning(text, rules, names):
+    for r in rules:
+        f = r["formal"]
+        if r["type"] in ("mandatory_edge", "forbidden_edge") and not ADJACENT.search(text):
+            return f"{r['type']}: no adjacency word"
+        if r["type"] == "precedence":
+            why = precedence_direction(text, f["before"], f["after"], names)
+            if why:
+                return why
     return None
 
 
