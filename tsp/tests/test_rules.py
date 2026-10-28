@@ -127,3 +127,10 @@ def test_initial_tour(inst):
     with open(wd + "/init/initial.tour") as f:
         nodes = f.read().split("TOUR_SECTION")[1].split()
     assert nodes[0] == "1" and nodes[N] == str(N + 1)                 # SOP: depot first, its copy last
+
+
+def test_violated_rules(inst):
+    coords, pure, rules, res = solved(inst, ["time_window", "forbidden_edge"], seed=5)
+    assert R.violated_rules(rules, coords, res["tour"]) == []
+    assert R.violated_rules(rules, coords, pure["tour"]) != []
+    assert len(R.violated_rules(rules, coords, pure["tour"])) == R.violations(rules, coords, pure["tour"])

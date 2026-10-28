@@ -310,6 +310,22 @@ def violations(rules, coords, tour):
     return int(bad)
 
 
+def violated_rules(rules, coords, tour):
+    """Indices of the hard rules a route breaks (time windows checked together, as in check_all)."""
+    tour = np.asarray(tour)
+    tws = [r for r in rules if r["type"] == "time_window"]
+    t = service_times(coords, tour, tws) if tws else None
+    pos = _pos(tour)
+    out = []
+    for k, r in enumerate(rules):
+        if r["type"] == "time_window":
+            if t[pos[r["formal"]["customer"]]] > r["formal"]["t2"] + TOL:
+                out.append(k)
+        elif r["type"] != "soft_zone" and not check_rule(r, coords, tour)[0]:
+            out.append(k)
+    return out
+
+
 def write_initial(path, coords, rules, tour):
     """INITIAL_TOUR_FILE from a route (e.g. the pure TSP one), in the direction that breaks fewer rules; in SOP the
     end copy of the depot (node n + 1) closes it."""
