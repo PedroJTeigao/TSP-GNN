@@ -2,6 +2,7 @@
 
 Arms (tsp_gnn.formalize):
     b0  regular expressions written over the generator's 4 formulations per type (no LLM);
+    b0p "b0+": keyword parser built from the meaning filters of part A (tsp_gnn.keyword_parser; no LLM);
     b1  local qwen2.5:7b (private Ollama, port 11435), catalog of the 5 types + JSON schema, zero-shot,
         temperature 0, context 8192;
     b2  b1 + 5 worked examples (hand-written, not from the test set);
@@ -22,6 +23,7 @@ import os
 import time
 
 from tsp_gnn import formalize as F
+from tsp_gnn import keyword_parser as K
 from tsp_gnn import llm
 from tsp_gnn.utils import git_info
 
@@ -32,7 +34,7 @@ ARMS = ("b0", "b1", "b2")
 def main():
     parser = argparse.ArgumentParser(description="Text -> formal rules: regex parser and local LLM arms.")
     parser.add_argument("--n", type=int, required=True)
-    parser.add_argument("--arms", nargs="+", default=list(ARMS))
+    parser.add_argument("--arms", nargs="+", default=list(ARMS), help=f"of {ARMS} and b0p")
     parser.add_argument("--limit", type=int, default=None, help="first instances only (tests)")
     parser.add_argument("--out", default=None, help="default data/phase5/formalize_tsp<n>.jsonl")
     args = parser.parse_args()
@@ -60,9 +62,9 @@ def main():
                         continue
                     t = row["text_v1"] if text == "v1" else row["text_v2"]
                     rec = {"idx": row["idx"], "n": n, "text": text, "arm": arm, "git_commit": commit}
-                    if arm == "b0":
+                    if arm in ("b0", "b0p"):
                         t0 = time.perf_counter()
-                        pred, errors = F.parse_regex(t), []
+                        pred, errors = (F.parse_regex(t) if arm == "b0" else K.parse_keywords(t, n)), []
                         rec.update(seconds=time.perf_counter() - t0, raw=None)
                     else:
                         content, sec, raw = llm.chat(F.system_prompt(arm), F.user_prompt(t, n), temperature=0.0,

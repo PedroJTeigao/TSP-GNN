@@ -112,3 +112,24 @@ def test_route_text_and_claims(solved):
                           rules) == ({3}, 0)
     assert V.match_claims({"violations": []}, rules) == (set(), 0)
     assert V.match_claims({"other": 1}, rules) == (None, 0)
+
+
+def test_keyword_parser_b0plus():
+    from tsp_gnn import keyword_parser as K
+    for kind, formal in {"precedence": dict(before=12, after=7), "forbidden_edge": dict(i=12, j=7),
+                         "mandatory_edge": dict(i=12, j=7), "time_window": dict(customer=12, t1=1.5, t2=2.25),
+                         "soft_zone": dict(zone="central", rect=list(R.ZONES["central"]), weight=1.0)}.items():
+        for v in range(len(R.TEMPLATES[kind])):                   # every generator formulation
+            rule = R.make_rule(kind, v, **formal)
+            got = K.parse_keywords(R.instance_text([rule]), 50)
+            assert [F.rule_key(g) for g in got] == [F.rule_key(rule)], rule["text"]
+    text = (R.PREAMBLE + "\nNamed places: customer 17 is the hospital; customer 4 is Rosa's café.\n"
+            "- Customer 9 has a dog, so ring the bell.\n"
+            "- Visit customer 30 only after the hospital has been served.\n"
+            "- Never go straight between Rosa's café and stop 22, and keep driving in the north and west zones low.\n"
+            "- The hospital and customer 5 must be visited one right after the other.\n"
+            "- Service at customer 8 must start between 2.50 and 3.75, and customer 41 accepts it from 0.40 to 1.10.")
+    got = {F.rule_key(r) for r in K.parse_keywords(text, 50)}
+    assert got == {("precedence", 17, 30), ("forbidden_edge", frozenset((4, 22))), ("soft_zone", "north"),
+                   ("soft_zone", "west"), ("mandatory_edge", frozenset((17, 5))),
+                   ("time_window", 8, 2.5, 3.75), ("time_window", 41, 0.4, 1.1)}

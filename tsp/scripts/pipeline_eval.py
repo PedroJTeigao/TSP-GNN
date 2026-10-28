@@ -86,6 +86,8 @@ def main():
     parser.add_argument("--time-limit", type=float, default=None, help="default 60 s at n <= 200, else 120 s")
     parser.add_argument("--out", default=None, help="default data/phase5/pipeline_tsp<n>.jsonl")
     parser.add_argument("--work", default="data/phase5/work")
+    parser.add_argument("--preds", default=None, help="predictions file, default data/phase5/formalize_tsp<n>.jsonl")
+    parser.add_argument("--no-oracle", action="store_true", help="only the arms in --preds (no oracle records)")
     args = parser.parse_args()
     n = args.n
     args.time_limit = args.time_limit or (60.0 if n <= 200 else 120.0)
@@ -96,8 +98,8 @@ def main():
     rows = {r["idx"]: r for r in map(json.loads, open(f"data/phase5/text_rules_v2b_tsp{n}.jsonl"))}
     step1 = {r["idx"]: r for r in map(json.loads, open(f"data/phase5/text_rules_tsp{n}.jsonl"))}
     arr = np.load(f"data/phase5/text_rules_tsp{n}.npz")
-    preds = [json.loads(line) for line in open(f"data/phase5/formalize_tsp{n}.jsonl")]
-    for idx, row in rows.items():
+    preds = [json.loads(line) for line in open(args.preds or f"data/phase5/formalize_tsp{n}.jsonl")]
+    for idx, row in ([] if args.no_oracle else rows.items()):
         for text in ("v1", "v2"):
             preds.append({"idx": idx, "text": text, "arm": "oracle", "pred": label_rules(row)})
 

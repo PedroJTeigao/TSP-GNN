@@ -27,8 +27,8 @@ SIZES = (200, 1000)
 DATA = "data/phase5"
 OUT = "results/phase5/text_rules_llm.md"
 DOCS = "docs/phase5_text_rules_llm_report.md"
-ARMS = ("b0", "b1", "b2")
-ARM_NAME = {"b0": "b0 regex", "b1": "b1 7B zero-shot", "b2": "b2 7B few-shot", "oracle": "oracle (label)"}
+ARMS = ("b0", "b0p", "b1", "b2")
+ARM_NAME = {"b0": "b0 regex", "b0p": "b0+ keywords", "b1": "b1 7B zero-shot", "b2": "b2 7B few-shot", "oracle": "oracle (label)"}
 TEXT_NAME = {"v1": "text_v1", "v2": "text_v2b"}
 TYPES = R.RULE_TYPES
 HARD = ("precedence", "forbidden_edge", "mandatory_edge", "time_window")
@@ -109,7 +109,7 @@ def part_a(rows, keep, errors):
 
 def part_b(rows, keep):
     out = ["## B. Formalisation: text → formal rules (JSON), exact match against the label", ""]
-    preds = {n: jl(f"{DATA}/formalize_tsp{n}.jsonl") for n in SIZES}
+    preds = {n: jl(f"{DATA}/formalize_tsp{n}.jsonl") + jl(f"{DATA}/formalize_b0p_tsp{n}.jsonl") for n in SIZES}
     res = {}
     out += ["| n | text | arm | rules exact (%) | instances exact (%) | answers with schema errors (%) | "
             "invalid JSON (%) | mean latency (s) |", "|---|---|---|---|---|---|---|---|"]
@@ -151,6 +151,27 @@ def part_b(rows, keep):
                 tot = sum(res[(n, text, arm)]["bytype"].get(t, [0, 0])[1] for n in SIZES if (n, text, arm) in res)
                 cells.append(f"{pc(c / tot)} ({tot})" if tot else "—")
             out.append(f"| {TEXT_NAME[text]} | {ARM_NAME[arm]} | " + " | ".join(cells) + " |")
+    out += ["", "Rules exact on text_v2b by how the rule is written (both n): its own sentence with customer numbers "
+            "only, its own sentence with at least one customer named, or inside a merged two-rule sentence. Soft "
+            "zones have no customer and are counted under 'numbers'.", "",
+            "| arm | own sentence, numbers | own sentence, named | merged sentence |", "|---|---|---|---|"]
+    for arm in ARMS:
+        cnt = defaultdict(lambda: [0, 0])
+        for n in SIZES:
+            for p in preds[n]:
+                if p["text"] != "v2" or p["arm"] != arm or p["idx"] not in keep[n]:
+                    continue
+                row = rows[n][p["idx"]]
+                s = F.score(label(row), p["pred"])
+                for r, ok in zip(row["rules"], s["correct"]):
+                    named = any(str(c) in row["names"] for c in F._customers(r))
+                    kind = "merged" if r["v2_source"] == "merged" else "named" if named else "numbers"
+                    cnt[kind][0] += ok
+                    cnt[kind][1] += 1
+        if cnt:
+            out.append(f"| {ARM_NAME[arm]} | " + " | ".join(
+                f"{pc(cnt[k][0] / cnt[k][1])} ({cnt[k][1]})" if cnt[k][1] else "—"
+                for k in ("numbers", "named", "merged")) + " |")
     out += ["", "Confusion of rule types on text_v2b, both n (rows: label type; columns: the type of the prediction "
             "matched to it — same key, else same customers / zone, else any shared customer; 'missing' = no "
             "prediction; last row: predictions matched to no label rule). Diagonal counts include wrong "
@@ -181,7 +202,8 @@ def part_c(rows, keep):
            "|---|---|---|---|---|---|---|---|---|"]
     res, vtypes = {}, defaultdict(Counter)
     for n in SIZES:
-        recs = [r for r in jl(f"{DATA}/pipeline_tsp{n}.jsonl") if r["idx"] in keep[n]]
+        recs = [r for r in jl(f"{DATA}/pipeline_tsp{n}.jsonl") + jl(f"{DATA}/pipeline_b0p_tsp{n}.jsonl")
+                if r["idx"] in keep[n]]
         for text in ("v1", "v2"):
             for arm in ARMS + ("oracle",):
                 rs = [r for r in recs if r["text"] == text and r["arm"] == arm]
