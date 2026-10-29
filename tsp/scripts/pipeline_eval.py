@@ -64,7 +64,7 @@ def solve_job(job):
     coords, pure = arr["coords"][idx], arr["pure_tours"][idx]
     wd = os.path.join(ARGS.work, f"pipe{n}_w{os.getpid()}")
     params = {"MAX_TRIALS": 1000, "TIME_LIMIT": ARGS.time_limit}
-    res = R.solve(coords, rules, wd, params, initial_tour=pure)
+    res = R.solve(coords, rules, wd, params, timeout=3 * ARGS.time_limit + 60, initial_tour=pure)
     tour = res["tour"] if res["feasible"] else pure
     return (idx, key), {"tour": np.asarray(tour).tolist(), "solver_feasible": bool(res["feasible"]),
                         "kind": res["kind"], "seconds": res["wall_seconds"]}

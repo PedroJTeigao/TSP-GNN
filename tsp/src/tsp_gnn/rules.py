@@ -292,7 +292,9 @@ def _run_lkh(workdir, problem, params, timeout):
                               timeout=timeout)
         log = proc.stdout + proc.stderr
     except subprocess.TimeoutExpired:
-        return None, "timeout"
+        # LKH-3 checks TIME_LIMIT only between trials and can spin forever inside one (seen on an SOP with fixed
+        # edges); the process is killed, and a tour it already wrote in this run is still used.
+        log = "timeout"
     if not os.path.exists(out) or os.stat(out).st_mtime_ns == old:
         return None, log
     return out, log
