@@ -18,7 +18,8 @@ Policies (one action per window, then the same "replace only if shorter" rule):
                else beam path if confidence >= conf, else nothing (P3; confidence needs the beam
                on every window, so its decoding time is paid everywhere)
 E2 ablation (ranked_refine): in each half-pass the top x % of the windows by a score go to LKH, the score
-being random, a simple geometric rule (simple_rule), the disagreement, or the real LKH gain (oracle).
+being random, a simple geometric rule (simple_rule), the disagreement, the real LKH gain (oracle) or a trained signal
+(learned; tsp_gnn.learned_triage).
 """
 
 import time
@@ -189,7 +190,7 @@ def triage_refine(coords, tour, w, policy, heatmaps=None, max_passes=3, beam_wid
 
 # ---------------------------------------------------------------- E2 ablation: which windows go to LKH
 
-RANKED_SCORES = ("random", "simple", "disagreement", "oracle")
+RANKED_SCORES = ("random", "simple", "disagreement", "oracle", "learned")
 
 
 def nn_distances(coords):
@@ -217,13 +218,15 @@ def top_fraction(scores, frac):
     return mask
 
 
-def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3):
+def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3, learned=None):
     """Window refinement where, in each half-pass, the top `frac` of the windows by `score` go to LKH and the
     others are left as they are. All policies thus send the same number of windows to LKH.
 
     score: "random" (uniform, from rng), "simple" (simple_rule), "disagreement" (segment_disagreement of the
     network's heatmap) or "oracle" (the real LKH gain of the window, current − LKH path length, as recorded
-    by window_log; LKH runs on every window to know it, so its time is not that of a usable policy).
+    by window_log; LKH runs on every window to know it, so its time is not that of a usable policy) or "learned"
+    (learned_triage.LearnedScore `learned` on the network's heatmaps plus geometric features; its instance context
+    is computed once and counted in ms_score).
     Returns (new tour, stats) as triage_refine, plus ms_score (time to compute the scores, network included).
     """
     assert score in RANKED_SCORES
@@ -235,6 +238,10 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
     if score == "simple":
         start = time.perf_counter()
         nn_dist = nn_distances(coords)
+        stats["ms_score"] += 1000 * (time.perf_counter() - start)
+    if score == "learned":
+        start = time.perf_counter()
+        learned.prepare(coords)
         stats["ms_score"] += 1000 * (time.perf_counter() - start)
     for _ in range(max_passes):
         stats["passes"] += 1
@@ -254,6 +261,11 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
                 heats = heatmaps(sets)
                 stats["ms_net"] += 1000 * (heatmaps.seconds - before)
                 values = np.array([segment_disagreement(h) for h in heats])
+            elif score == "learned":
+                before = heatmaps.seconds
+                heats = heatmaps(sets)
+                stats["ms_net"] += 1000 * (heatmaps.seconds - before)
+                values = learned.values(coords, t, idx, heats, [s for s, _ in wins])
             else:
                 orders = [lkh_path(pts) for pts in sets]
                 values = np.array([path_length(p) - path_length(p[o]) for p, o in zip(sets, orders)])

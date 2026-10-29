@@ -76,3 +76,24 @@ def split_instances(num, seed=0, frac=0.5):
     mask = np.zeros(num, dtype=bool)
     mask[order[:int(round(frac * num))]] = True
     return mask
+
+
+class LearnedScore:
+    """The trained signal as a triage score for triage.ranked_refine(score="learned").
+
+    bundle: what scripts/learned_triage_train.py saved (model, kind, features). prepare(coords) computes the instance
+    context once; values(coords, tour, idx, heats, starts) scores the windows of one half-pass (higher = send to LKH).
+    """
+
+    def __init__(self, bundle):
+        self.model, self.kind, self.features = bundle["model"], bundle["kind"], tuple(bundle["features"])
+        assert set(self.features) <= set(FEATURES), "the policy only computes the main features"
+        self.ctx = None
+
+    def prepare(self, coords):
+        self.ctx = instance_context(coords)
+
+    def values(self, coords, tour, idx, heats, starts):
+        rows = [window_features(self.ctx, coords, tour[i], h, s) for i, h, s in zip(idx, heats, starts)]
+        X = np.array([[r[f] for f in self.features] for r in rows], dtype=float)
+        return self.model.predict(X) if self.kind == "hgb_reg" else self.model.predict_proba(X)[:, 1]

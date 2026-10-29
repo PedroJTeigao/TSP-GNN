@@ -42,3 +42,33 @@ def test_split_by_instance():
     train = a[inst]
     assert set(inst[train]).isdisjoint(set(inst[~train]))
     assert len(set(inst[train])) == 50 and len(set(inst[~train])) == 50
+
+
+def test_learned_score_ranks_windows():
+    from tsp_gnn.triage import ranked_refine
+
+    class Dummy:                                         # "probability" = segment length / NN distances
+        def predict_proba(self, X):
+            return np.stack([1 - X[:, 0], X[:, 0]], axis=1)
+
+    rng = np.random.default_rng(0)
+    coords = rng.random((60, 2))
+    score = L.LearnedScore({"model": Dummy(), "kind": "hgb", "features": ("seg_len_nn",)})
+    score.prepare(coords)
+    tour = rng.permutation(60)
+    idx = [np.arange(0, 20), np.arange(20, 40)]
+    heats = [np.zeros((20, 20))] * 2
+    v = score.values(coords, tour, idx, heats, [0, 20])
+    ctx = L.instance_context(coords)
+    assert v[1] == pytest.approx(L.window_features(ctx, coords, tour[idx[1]], heats[1], 20)["seg_len_nn"])
+
+    class Net:                                           # stands in for hier.Heatmaps
+        seconds = 0.0
+
+        def __call__(self, sets):
+            return [np.zeros((len(p), len(p))) for p in sets]
+
+    t, stats = ranked_refine(coords, tour, 20, "learned", 0.5, heatmaps=Net(), learned=score)
+    assert sorted(t.tolist()) == list(range(60))
+    # 3 windows per half-pass, top 50 % = round(1.5) = 2 of them to LKH
+    assert stats["windows"] == 6 * stats["passes"] and stats["to_lkh"] == 4 * stats["passes"]
