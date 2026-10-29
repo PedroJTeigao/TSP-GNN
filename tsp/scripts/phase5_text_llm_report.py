@@ -107,6 +107,9 @@ def part_a(rows, keep, errors):
 
 # ---------------------------------------------------------------------------------------------------- part B
 
+EXACT = {}   # (n, idx, text, arm) -> translation exact (part B scoring); used for the translation column of part C
+
+
 def part_b(rows, keep):
     out = ["## B. Formalisation: text → formal rules (JSON), exact match against the label", ""]
     preds = {n: F.load_preds(f"{DATA}/formalize_tsp{n}.jsonl", n) + jl(f"{DATA}/formalize_b0p_tsp{n}.jsonl")
@@ -125,6 +128,7 @@ def part_b(rows, keep):
                 bytype = defaultdict(lambda: [0, 0])
                 for p in ps:
                     s = F.score(label(rows[n][p["idx"]]), p["pred"])
+                    EXACT[(n, p["idx"], text, arm)] = s["exact"]
                     rc += sum(s["correct"])
                     rt += len(s["correct"])
                     ic += s["exact"]
@@ -218,7 +222,8 @@ def part_c(rows, keep):
                                        "viol": np.mean([len(r["violated"]) for r in rs]),
                                        "cost": np.mean([r["cost_vs_reference"] for r in rs])}
                 out.append(f"| {n} | {TEXT_NAME[text]} | {ARM_NAME[arm]} | "
-                           f"{pc(np.mean([r['reused_reference'] for r in rs]))} | {pc(res[(n, text, arm)]['valid'])} | "
+                           f"{pc(np.mean([EXACT.get((n, r['idx'], text, arm), arm == 'oracle') for r in rs]))} | "
+                           f"{pc(res[(n, text, arm)]['valid'])} | "
                            f"{res[(n, text, arm)]['viol']:.2f} | {100 * res[(n, text, arm)]['cost']:+.2f} | "
                            f"{pc(np.mean([not r['solver_feasible'] for r in rs]))} | "
                            f"{pc(np.mean([bool(r['repairs']) for r in rs]))} |")

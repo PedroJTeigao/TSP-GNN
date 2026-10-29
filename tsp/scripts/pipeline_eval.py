@@ -54,7 +54,10 @@ def repair(pred):
 
 
 def rule_set_key(rules):
-    return tuple(sorted(repr(F.rule_key(r)) for r in rules))
+    # frozensets (edges) are written sorted: their repr order is not stable, which made some exact translations
+    # look different from the label (solved again by LKH instead of reusing the reference; results unaffected)
+    return tuple(sorted(repr(tuple(tuple(sorted(x)) if isinstance(x, frozenset) else x for x in F.rule_key(r)))
+                        for r in rules))
 
 
 def solve_job(job):
