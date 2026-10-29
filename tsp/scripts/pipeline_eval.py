@@ -64,7 +64,11 @@ def solve_job(job):
     coords, pure = arr["coords"][idx], arr["pure_tours"][idx]
     wd = os.path.join(ARGS.work, f"pipe{n}_w{os.getpid()}")
     params = {"MAX_TRIALS": 1000, "TIME_LIMIT": ARGS.time_limit}
-    res = R.solve(coords, rules, wd, params, timeout=3 * ARGS.time_limit + 60, initial_tour=pure)
+    try:
+        res = R.solve(coords, rules, wd, params, timeout=3 * ARGS.time_limit + 60, initial_tour=pure)
+    except Exception as e:                  # one bad rule set must not lose the other solves (written at the end)
+        return (idx, key), {"tour": np.asarray(pure).tolist(), "solver_feasible": False,
+                            "kind": R.problem_kind(rules), "seconds": 0.0, "solver_error": repr(e)}
     tour = res["tour"] if res["feasible"] else pure
     return (idx, key), {"tour": np.asarray(tour).tolist(), "solver_feasible": bool(res["feasible"]),
                         "kind": res["kind"], "seconds": res["wall_seconds"]}
@@ -100,7 +104,7 @@ def main():
     rows = {r["idx"]: r for r in map(json.loads, open(f"data/phase5/text_rules_v2b_tsp{n}.jsonl"))}
     step1 = {r["idx"]: r for r in map(json.loads, open(f"data/phase5/text_rules_tsp{n}.jsonl"))}
     arr = np.load(f"data/phase5/text_rules_tsp{n}.npz")
-    preds = [json.loads(line) for line in open(args.preds or f"data/phase5/formalize_tsp{n}.jsonl")]
+    preds = F.load_preds(args.preds or f"data/phase5/formalize_tsp{n}.jsonl", n)
     for idx, row in ([] if args.no_oracle else rows.items()):
         for text in ("v1", "v2"):
             preds.append({"idx": idx, "text": text, "arm": "oracle", "pred": label_rules(row)})
@@ -136,11 +140,12 @@ def main():
             idx = p["idx"]
             coords = arr["coords"][idx]
             label = label_rules(rows[idx])
+            error = None
             if is_label:
                 tour, feas, seconds = arr["tours"][idx], True, step1[idx]["seconds"]
             else:
                 s = solved[(idx, key)]
-                tour, feas, seconds = np.array(s["tour"]), s["solver_feasible"], s["seconds"]
+                tour, feas, seconds, error = np.array(s["tour"]), s["solver_feasible"], s["seconds"], s.get("solver_error")
             violated = [label[k]["type"] for k in R.violated_rules(label, coords, tour)]
             valid = R.check_all(label, coords, tour)
             obj = R.objective(coords, tour, label)
@@ -149,7 +154,8 @@ def main():
                                 "repairs": notes, "solver_feasible": feas, "kind": R.problem_kind(rules),
                                 "lkh_seconds": seconds, "valid": bool(valid), "violated": violated,
                                 "objective": obj, "reference_objective": ref,
-                                "cost_vs_reference": obj / ref - 1, "git_commit": commit}) + "\n")
+                                "cost_vs_reference": obj / ref - 1, "solver_error": error,
+                                "git_commit": commit}) + "\n")
     print(f"commit {commit}{' (uncommitted changes)' if dirty else ''}  |  saved to {out}")
 
 

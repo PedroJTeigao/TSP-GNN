@@ -109,7 +109,8 @@ def part_a(rows, keep, errors):
 
 def part_b(rows, keep):
     out = ["## B. Formalisation: text → formal rules (JSON), exact match against the label", ""]
-    preds = {n: jl(f"{DATA}/formalize_tsp{n}.jsonl") + jl(f"{DATA}/formalize_b0p_tsp{n}.jsonl") for n in SIZES}
+    preds = {n: F.load_preds(f"{DATA}/formalize_tsp{n}.jsonl", n) + jl(f"{DATA}/formalize_b0p_tsp{n}.jsonl")
+             for n in SIZES}
     res = {}
     out += ["| n | text | arm | rules exact (%) | instances exact (%) | answers with schema errors (%) | "
             "invalid JSON or aborted answer (%) | mean latency (s) |", "|---|---|---|---|---|---|---|---|"]

@@ -28,6 +28,8 @@ def test_validate_schema():
     assert rules[0]["formal"] == {"before": 3, "after": 9}
     assert rules[3]["formal"]["rect"] == list(R.ZONES["north"])
     assert len(errors) == 7
+    assert F.validate({"rules": [{"type": "time_window", "customer": 7, "t1": 0, "t2": "inf"}]}, 50) == \
+        ([], ["ValueError: t1 or t2 not finite"])
     assert F.validate({"answer": []}, 50) == ([], ["no rules list"])
     assert F.validate(None, 50) == ([], ["no rules list"])
 

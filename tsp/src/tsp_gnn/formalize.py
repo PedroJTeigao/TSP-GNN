@@ -9,6 +9,7 @@ form used to compare a prediction with the label (edges are unordered, times rou
 """
 
 import json
+import math
 import re
 
 from tsp_gnn import rules as R
@@ -121,6 +122,8 @@ def validate(obj, n):
                 formal = {"zone": zone, "rect": list(R.ZONES[zone]), "weight": R.SOFT_WEIGHT}
             elif kind == "time_window":
                 formal = {"customer": _int(item["customer"]), "t1": float(item["t1"]), "t2": float(item["t2"])}
+                if not (math.isfinite(formal["t1"]) and math.isfinite(formal["t2"])):
+                    raise ValueError("t1 or t2 not finite")    # e.g. "t2": "inf", which float() accepts
                 if not formal["t1"] <= formal["t2"]:
                     raise ValueError("t1 > t2")
             else:
@@ -134,6 +137,22 @@ def validate(obj, n):
         except (KeyError, TypeError, ValueError) as e:
             errors.append(f"{type(e).__name__}: {e}")
     return out, errors
+
+
+def load_preds(path, n):
+    """Records of formalize_eval.py, with the LLM answers validated again from the raw answer by the current
+    validate (the schema gained the finite-time check after part B ran); the regex and keyword arms are kept."""
+    from tsp_gnn.llm import extract_json
+    out = []
+    for line in open(path):
+        e = json.loads(line)
+        if e["arm"] in ("b1", "b2") and e.get("raw") is not None:
+            obj = extract_json(e["raw"])
+            e["pred"], e["errors"] = validate(obj, n)
+            if obj is None:
+                e["errors"] = ["invalid JSON"]
+        out.append(e)
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------- scoring
