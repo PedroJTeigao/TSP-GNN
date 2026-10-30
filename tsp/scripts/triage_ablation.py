@@ -6,6 +6,9 @@ w = 20, offsets 0 and w/2, at most 3 passes, from the greedy edge + 2-opt tour).
     simple         segment length / sum of the nearest-neighbour distances of its cities (no model)
     disagreement   1 − mean network probability of the segment's edges; --seeds is ONE TAGCN K=3 seed
     oracle         the real LKH gain of the window (an upper bound: LKH runs on every window to know it)
+    fast_disagreement / fast_learned     the same scores, batched (tsp_gnn.fast_triage.WindowBatchScorer)
+    global_disagreement / global_learned one network pass on the whole instance (fast_triage.GlobalScorer);
+                                         global_learned needs a model trained on global features (--model)
     learned        trained window signal (scripts/learned_triage_train.py, --model) on the network's heatmaps and
                    geometric features; --seeds is ONE TAGCN K=3 seed
 Unlike P2 of the triage experiment (fixed thresholds from tsp200), every score sends exactly the same share of
@@ -31,6 +34,7 @@ import torch
 
 from tsp_gnn.data import load_dataset, tour_length
 from tsp_gnn.decode import optimality_gap, verify_tour
+from tsp_gnn.fast_triage import GlobalScorer, WindowBatchScorer
 from tsp_gnn.learned_triage import LearnedScore
 from tsp_gnn.triage import RANKED_SCORES, ranked_refine
 from tsp_gnn.utils import git_info
@@ -39,12 +43,14 @@ from tsp_gnn.window import initial_tour
 from triage_log import load_heatmaps
 
 FIELDS = ("ms_score", "ms_net", "ms_lkh", "windows", "to_lkh", "improved", "passes")
+BATCHED = ("fast_disagreement", "fast_learned", "global_disagreement", "global_learned")
+NETWORK = ("disagreement", "learned") + BATCHED                      # scores that need a TAGCN seed
 
 
 def main():
     parser = argparse.ArgumentParser(description="E2: ranked triage policies (random / simple / disagreement / oracle).")
     parser.add_argument("--data", required=True)
-    parser.add_argument("--score", choices=RANKED_SCORES, required=True)
+    parser.add_argument("--score", choices=RANKED_SCORES[:-1] + BATCHED, required=True)
     parser.add_argument("--seeds", type=int, nargs="+", default=None,
                         help="random: rng seeds (default 0-4); disagreement: one TAGCN K=3 seed")
     parser.add_argument("--fracs", type=int, nargs="+", default=[20, 50], help="x, in % of the windows")
@@ -54,20 +60,25 @@ def main():
     parser.add_argument("--max-instances", type=int, default=None)
     parser.add_argument("--model", default=None, help="learned: chosen.joblib of scripts/learned_triage_train.py")
     args = parser.parse_args()
-    if args.score in ("disagreement", "learned") and (args.seeds is None or len(args.seeds) != 1):
+    if args.score in NETWORK and (args.seeds is None or len(args.seeds) != 1):
         parser.error(f"{args.score} needs exactly one --seeds (the TAGCN K=3 seed)")
-    if args.score == "learned" and args.model is None:
+    if args.score.endswith("learned") and args.model is None:
         parser.error("learned needs --model")
     seeds = args.seeds if args.seeds is not None else ([0, 1, 2, 3, 4] if args.score == "random" else [None])
-    folder = f"{args.score}_seed{seeds[0]}" if args.score in ("disagreement", "learned") else args.score
+    folder = f"{args.score}_seed{seeds[0]}" if args.score in NETWORK else args.score
     out_dir = os.path.join(args.out_root, folder)
     name = os.path.splitext(os.path.basename(args.data))[0]
     if os.path.exists(os.path.join(out_dir, f"{name}.json")):
         print(f"{out_dir}/{name}.json already exists: skipped")
         return
     torch.set_num_threads(2)
-    heatmaps, epoch = load_heatmaps(seeds[0]) if args.score in ("disagreement", "learned") else (None, None)
+    heatmaps, epoch = load_heatmaps(seeds[0]) if args.score in NETWORK else (None, None)
     learned = LearnedScore(joblib.load(args.model)) if args.score == "learned" else None
+    scorer, run_score = None, args.score
+    if args.score in BATCHED:
+        bundle = joblib.load(args.model) if args.score.endswith("learned") else None
+        cls = WindowBatchScorer if args.score.startswith("fast") else GlobalScorer
+        scorer, run_score = cls(heatmaps.model, heatmaps.device, bundle), "scorer"   # no warm-up, as for the others
 
     # One policy per (rng seed, x); the random generator of each (instance, policy) is seeded from both.
     policies = {}
@@ -94,8 +105,8 @@ def main():
         for p, (s, x) in policies.items():
             rng = np.random.default_rng([s, i]) if args.score == "random" else None
             start = time.perf_counter()
-            tour, stats = ranked_refine(coords, t0, args.width, args.score, x / 100, heatmaps, rng, args.max_passes,
-                                        learned)
+            tour, stats = ranked_refine(coords, t0, args.width, run_score, x / 100, heatmaps, rng, args.max_passes,
+                                        learned, scorer)
             add(f"{p}__ms", 1000 * (time.perf_counter() - start))
             verify_tour(tour, n)
             g = optimality_gap(tour_length(coords, tour), opt)

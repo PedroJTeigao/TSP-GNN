@@ -190,7 +190,7 @@ def triage_refine(coords, tour, w, policy, heatmaps=None, max_passes=3, beam_wid
 
 # ---------------------------------------------------------------- E2 ablation: which windows go to LKH
 
-RANKED_SCORES = ("random", "simple", "disagreement", "oracle", "learned")
+RANKED_SCORES = ("random", "simple", "disagreement", "oracle", "learned", "scorer")
 
 
 def nn_distances(coords):
@@ -218,7 +218,7 @@ def top_fraction(scores, frac):
     return mask
 
 
-def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3, learned=None):
+def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3, learned=None, scorer=None):
     """Window refinement where, in each half-pass, the top `frac` of the windows by `score` go to LKH and the
     others are left as they are. All policies thus send the same number of windows to LKH.
 
@@ -226,7 +226,8 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
     network's heatmap) or "oracle" (the real LKH gain of the window, current − LKH path length, as recorded
     by window_log; LKH runs on every window to know it, so its time is not that of a usable policy) or "learned"
     (learned_triage.LearnedScore `learned` on the network's heatmaps plus geometric features; its instance context
-    is computed once and counted in ms_score).
+    is computed once and counted in ms_score) or "scorer" (a batched scorer of tsp_gnn.fast_triage, `scorer`: its
+    prepare() is counted in ms_score, its network time also in ms_net).
     Returns (new tour, stats) as triage_refine, plus ms_score (time to compute the scores, network included).
     """
     assert score in RANKED_SCORES
@@ -239,10 +240,13 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
         start = time.perf_counter()
         nn_dist = nn_distances(coords)
         stats["ms_score"] += 1000 * (time.perf_counter() - start)
-    if score == "learned":
+    if score in ("learned", "scorer"):
         start = time.perf_counter()
-        learned.prepare(coords)
+        before = scorer.net_seconds if score == "scorer" else 0.0
+        (learned if score == "learned" else scorer).prepare(coords)
         stats["ms_score"] += 1000 * (time.perf_counter() - start)
+        if score == "scorer":
+            stats["ms_net"] += 1000 * (scorer.net_seconds - before)
     for _ in range(max_passes):
         stats["passes"] += 1
         pass_gain = 0.0
@@ -266,6 +270,10 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
                 heats = heatmaps(sets)
                 stats["ms_net"] += 1000 * (heatmaps.seconds - before)
                 values = learned.values(coords, t, idx, heats, [s for s, _ in wins])
+            elif score == "scorer":
+                before = scorer.net_seconds
+                values = scorer.values(coords, t, wins)
+                stats["ms_net"] += 1000 * (scorer.net_seconds - before)
             else:
                 orders = [lkh_path(pts) for pts in sets]
                 values = np.array([path_length(p) - path_length(p[o]) for p, o in zip(sets, orders)])
