@@ -4,23 +4,21 @@ Generated 2026-10-30 by scripts/phase3_fast_triage_report.py. TAGCN K=3 (3 seeds
 
 ## Summary
 
-**At equal time, does the learned signal now beat random? Yes on tsp1000. On Fu-10k only in the lighter-load
-diagnostic, not in the 7-process policy run.**
+**At equal time, does the learned signal now beat random? On tsp1000 yes (not significant); on Fu-10k no: it is a
+tie.**
 - **tsp1000.** The batched learned signal at top 50 % gives 3.838 % in 1.36 s; random at 50 % gives 3.888 % in
   1.43 s. So it is faster and better, but the difference is not significant (p = 0.19, 20 instances).
-- **Fu-10k, 7 processes.** In the 7-process policy run the learned signal at top 50 % is better (3.920 % against
-  3.939 %, 81 % of the instances, p = 0.006) but takes 17.4 s against 13.9 s.
-  - Scoring is no longer the reason: it takes 0.35 s.
-  - The reason is LKH: with the same 1500 windows sent, LKH took 8.8 ms per window in the network processes and
-    7.2 ms in the random process running alongside them.
-- **Fu-10k, diagnostic.** The diagnostic ran 3 processes together on 4 Fu-10k instances.
-  - The extra LKH time falls to +3–6 % per window (7.6–7.8 ms against 7.3 ms). That is about what the window logs
-    predict (windows LKH improves take +7 %).
-  - The learned signal at top 50 % then beats random at 50 % on both time and gap: 14.6–14.9 s and 3.909 %, against
-    15.3 s and 3.926 %. This is only 4 instances, with no test.
-  - The torch thread count is not the cause: 1 and 2 threads give the same times.
-  - So, at 10k, the answer depends on how loaded the machine is. Under load, the processes that run the network pay
-    more for their own LKH calls; I have not isolated why.
+- **Fu-10k, one process at a time** (the clean measurement).
+  - Random at 50 % takes 13.67 s, and 13.79 s when repeated alone at the end under the same outside load. Either way
+    it reaches 3.939 %.
+  - The learned signal at top 50 % takes 14.83 s (+7.5 %) for 3.920 %, a gain of only −0.019 pp.
+  - The learned signal at top 20 % takes 8.13 s for 4.074 %.
+  - Interpolating between its top 20 % and top 50 %, at random's 13.8 s the learned signal would reach ≈ 3.944 %,
+    the same as random. The extra time is LKH working on harder windows; scoring is only 0.35 s.
+- **Fu-10k, 7 processes together.** The gap between the two is larger: 17.4 s against 13.9 s. Under that load the
+  network processes pay more for their own LKH calls.
+- **The 3-process diagnostic** suggested a win at 10k, but it used only the first 4 instances. The full sequential
+  run (16 instances, 3 seeds) does not confirm it.
 
 ## The cheap scoring (version A)
 
@@ -60,10 +58,12 @@ diagnostic, not in the 7-process policy run.**
     network head is now applied in edge chunks (peak 0.81 GiB).
   - The per-window and oracle rows come from the previous run (8 processes). Their gaps are deterministic; their
     times carry that run's load.
-- **The diagnostic is small.** It used 4 instances and one rng / TAGCN seed, so it shows the load effect but is not a
-  test.
-- **The equal-time answer at 10k is conditional.** A clean answer needs the policies timed under the same, light
-  load (e.g. one process at a time). That has not been run.
+- **The diagnostic is small.** It used 4 instances and one rng / TAGCN seed. Its apparent 10k win is not confirmed
+  by the full sequential run.
+- **The sequential run was not on an idle machine.** Another project (an Ollama server at ~250 % CPU and a 4-worker
+  job) raised the load average from 0.4 to 6–9 a few minutes after it started. So random was repeated alone at the
+  end, under that load. Its time barely changed (13.67 → 13.79 s at 50 %), so the comparison holds. Loads before and
+  after each run are in the table.
 
 ## Scoring time
 
@@ -139,24 +139,39 @@ w = 20, ≤ 3 passes, top x % of the windows of each half-pass to LKH (E2 protoc
 
 ### Same time
 
-| Set | Policy (sorted by time) | Time (s) | Gap (%) |
+| Set | Policy (sorted by time of the run together) | Time, together (s) | Time, sequential (s) | Time, sequential, random repeated at the end (s) | Gap (%) |
+|---|---|---|---|---|---|
+| tsp1000_test | Random (5 seeds), top 20 % | 0.77 | — | — | 4.260 |
+| tsp1000_test | Disagreement, batched A, top 20 % | 0.78 | — | — | 4.091 |
+| tsp1000_test | Learned (retrained), global B, top 20 % | 0.80 | — | — | 4.220 |
+| tsp1000_test | Learned, batched A, top 20 % | 0.80 | — | — | 4.031 |
+| tsp1000_test | Disagreement, batched A, top 50 % | 1.35 | — | — | 3.859 |
+| tsp1000_test | Learned (retrained), global B, top 50 % | 1.35 | — | — | 3.907 |
+| tsp1000_test | Learned, batched A, top 50 % | 1.36 | — | — | 3.838 |
+| tsp1000_test | Random (5 seeds), top 50 % | 1.43 | — | — | 3.888 |
+| tsp10000_test_concorde | Random (5 seeds), top 20 % | 7.44 | 7.13 | 7.21 | 4.212 |
+| tsp10000_test_concorde | Learned (retrained), global B, top 20 % | 7.98 | — | — | 4.225 |
+| tsp10000_test_concorde | Disagreement, batched A, top 20 % | 9.35 | 7.70 | — | 4.121 |
+| tsp10000_test_concorde | Learned, batched A, top 20 % | 9.60 | 8.13 | — | 4.074 |
+| tsp10000_test_concorde | Random (5 seeds), top 50 % | 13.93 | 13.67 | 13.79 | 3.939 |
+| tsp10000_test_concorde | Learned (retrained), global B, top 50 % | 13.97 | — | — | 3.985 |
+| tsp10000_test_concorde | Disagreement, batched A, top 50 % | 17.21 | 14.25 | — | 3.942 |
+| tsp10000_test_concorde | Learned, batched A, top 50 % | 17.37 | 14.83 | — | 3.920 |
+
+*Together*: random and the batched scores run at the same time (7 processes; B: random + B processes, Fu-10k B one at a time). *Sequential* (Fu-10k only): one process at a time, no other process of ours running; machine load in the table below. Gaps are the same in both runs (same seeds, deterministic).
+
+Machine load during the sequential run (Fu-10k):
+
+| Run | Load average before (1 / 5 / 15 min) | after | GPU used by other processes before / after (MiB) |
 |---|---|---|---|
-| tsp1000_test | Random (5 seeds), top 20 % | 0.77 | 4.260 |
-| tsp1000_test | Disagreement, batched A, top 20 % | 0.78 | 4.091 |
-| tsp1000_test | Learned (retrained), global B, top 20 % | 0.80 | 4.220 |
-| tsp1000_test | Learned, batched A, top 20 % | 0.80 | 4.031 |
-| tsp1000_test | Disagreement, batched A, top 50 % | 1.35 | 3.859 |
-| tsp1000_test | Learned (retrained), global B, top 50 % | 1.35 | 3.907 |
-| tsp1000_test | Learned, batched A, top 50 % | 1.36 | 3.838 |
-| tsp1000_test | Random (5 seeds), top 50 % | 1.43 | 3.888 |
-| tsp10000_test_concorde | Random (5 seeds), top 20 % | 7.44 | 4.212 |
-| tsp10000_test_concorde | Learned (retrained), global B, top 20 % | 7.98 | 4.225 |
-| tsp10000_test_concorde | Disagreement, batched A, top 20 % | 9.35 | 4.121 |
-| tsp10000_test_concorde | Learned, batched A, top 20 % | 9.60 | 4.074 |
-| tsp10000_test_concorde | Random (5 seeds), top 50 % | 13.93 | 3.939 |
-| tsp10000_test_concorde | Learned (retrained), global B, top 50 % | 13.97 | 3.985 |
-| tsp10000_test_concorde | Disagreement, batched A, top 50 % | 17.21 | 3.942 |
-| tsp10000_test_concorde | Learned, batched A, top 50 % | 17.37 | 3.920 |
+| random | 0.38 / 0.53 / 1.48 | 7.32 / 7.34 / 5.78 | 13460 / 13460 |
+| fast_disagreement_seed0 | 7.32 / 7.34 / 5.78 | 8.69 / 7.82 / 6.42 | 13460 / 13460 |
+| fast_learned_seed0 | 8.69 / 7.82 / 6.42 | 6.32 / 7.35 / 6.67 | 13460 / 13460 |
+| fast_disagreement_seed1 | 6.32 / 7.35 / 6.67 | 7.73 / 6.94 / 6.63 | 13460 / 13460 |
+| fast_learned_seed1 | 7.73 / 6.94 / 6.63 | 8.04 / 6.96 / 6.66 | 13460 / 13460 |
+| fast_disagreement_seed2 | 8.04 / 6.96 / 6.66 | 4.85 / 6.17 / 6.47 | 13460 / 13460 |
+| fast_learned_seed2 | 4.85 / 6.17 / 6.47 | 6.38 / 6.63 / 6.64 | 13460 / 13460 |
+| random_after | 6.44 / 6.64 / 6.65 | 6.58 / 5.66 / 5.66 | 13460 / 13460 |
 
 ### Paired tests
 
