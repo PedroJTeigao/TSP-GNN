@@ -59,19 +59,21 @@ def main():
     parser.add_argument("--out-root", default="results/phase3_benchmark/e2")
     parser.add_argument("--max-instances", type=int, default=None)
     parser.add_argument("--model", default=None, help="learned: chosen.joblib of scripts/learned_triage_train.py")
+    parser.add_argument("--torch-threads", type=int, default=2, help="torch CPU threads (2 in every earlier run)")
+    parser.add_argument("--folder-suffix", default="", help="appended to the output folder (diagnostic runs)")
     args = parser.parse_args()
     if args.score in NETWORK and (args.seeds is None or len(args.seeds) != 1):
         parser.error(f"{args.score} needs exactly one --seeds (the TAGCN K=3 seed)")
     if args.score.endswith("learned") and args.model is None:
         parser.error("learned needs --model")
     seeds = args.seeds if args.seeds is not None else ([0, 1, 2, 3, 4] if args.score == "random" else [None])
-    folder = f"{args.score}_seed{seeds[0]}" if args.score in NETWORK else args.score
+    folder = (f"{args.score}_seed{seeds[0]}" if args.score in NETWORK else args.score) + args.folder_suffix
     out_dir = os.path.join(args.out_root, folder)
     name = os.path.splitext(os.path.basename(args.data))[0]
     if os.path.exists(os.path.join(out_dir, f"{name}.json")):
         print(f"{out_dir}/{name}.json already exists: skipped")
         return
-    torch.set_num_threads(2)
+    torch.set_num_threads(args.torch_threads)
     heatmaps, epoch = load_heatmaps(seeds[0]) if args.score in NETWORK else (None, None)
     learned = LearnedScore(joblib.load(args.model)) if args.score == "learned" else None
     scorer, run_score = None, args.score

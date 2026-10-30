@@ -200,6 +200,27 @@ def table_tests():
     return lines
 
 
+def table_diag():
+    """LKH time per window sent to LKH: random against the batched learned with 2 / 1 torch threads (4 Fu-10k
+    instances, the three run together)."""
+    root = os.path.join(ROOT, "diag")
+    rows = [("Random (rng seed 0)", "random", "random_s0_top{x}"),
+            ("Learned, batched A, torch threads 2", "fast_learned_seed0_threads2", "fast_learned_top{x}"),
+            ("Learned, batched A, torch threads 1", "fast_learned_seed0_threads1", "fast_learned_top{x}")]
+    lines = ["| x | Policy | LKH time per window sent (ms) | Total time (s) | Gap (%) |", "|---|---|---|---|---|"]
+    found = False
+    for x in FRACS:
+        for label, folder, key in rows:
+            r = npz(os.path.join(root, folder, "tsp10000_test_concorde.npz"))
+            if r is None:
+                continue
+            found = True
+            k = key.format(x=x)
+            lines.append(f"| {x} % | {label} | {r[k + '__ms_lkh'].sum() / r[k + '__to_lkh'].sum():.2f} | "
+                         f"{((r['initial__ms'] + r[k + '__ms']) / 1000).mean():.2f} | {r[k + '__gap'].mean():.3f} |")
+    return lines if found else ["missing"]
+
+
 def main():
     B = json.load(open(os.path.join(ROOT, "b_decision.json"))) if os.path.exists(os.path.join(ROOT, "b_decision.json")) else {}
     notes = open(NOTES).read().strip() if os.path.exists(NOTES) else f"(notes missing: {NOTES})"
@@ -213,7 +234,8 @@ def main():
              "### Policy outcome: batched A against per-window", "", *table_identity(), "",
              "## Policies (E2 protocol)", "", *table_policy(keys + ["disagreement", "learned", "oracle"]), "",
              "### Same time", "", *table_same_time(keys), "",
-             "### Paired tests", "", *table_tests(), ""]
+             "### Paired tests", "", *table_tests(), "",
+             "## Diagnostic: LKH time of the network policies", "", *table_diag(), ""]
     open(OUT, "w").write("\n".join(lines) + "\n")
     os.makedirs(os.path.dirname(DOCS), exist_ok=True)
     shutil.copy(OUT, DOCS)

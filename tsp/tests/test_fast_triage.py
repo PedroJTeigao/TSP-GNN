@@ -90,7 +90,7 @@ def test_global_graph_and_lookup(net):
     g, keys = F.global_knn_graph(coords, 30)
     ref = knn_graph(coords, 30)
     assert torch.equal(g.edge_index, ref.edge_index) and torch.allclose(g.edge_attr, ref.edge_attr)
-    sc = F.GlobalScorer(model, device, k_max=30)
+    sc = F.GlobalScorer(model, device, k_max=30, chunk=1000)                # head in several chunks
     sc.prepare(coords)
     with torch.no_grad():
         p = torch.sigmoid(model(ref))

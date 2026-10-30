@@ -181,12 +181,23 @@ def global_knn_graph(coords, k):
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr), keys
 
 
+@torch.no_grad()
+def edge_probs(model, data, chunk):
+    """sigmoid(model(data)) with the edge head applied in chunks of `chunk` edges (same values as model(data); on a
+    10k instance the head's (E, 3 · hidden) input alone is ~0.8 GiB)."""
+    h, e = model.encode(data)
+    src, dst = data.edge_index
+    out = [model.head(torch.cat([h[src[lo:lo + chunk]], h[dst[lo:lo + chunk]], e[lo:lo + chunk]], dim=-1))
+           for lo in range(0, src.numel(), chunk)]
+    return torch.sigmoid(torch.cat(out).squeeze(-1))
+
+
 class GlobalScorer(_Scorer):
     """Version B: one network pass on the whole instance; window probabilities read from the global p."""
 
-    def __init__(self, model, device, learned=None, k_max=100):
+    def __init__(self, model, device, learned=None, k_max=100, chunk=131072):
         super().__init__(model, device, learned)
-        self.k_max = k_max
+        self.k_max, self.chunk = k_max, chunk
         self.missing = [0, 0]                         # tour edges looked up outside the global graph, all looked up
 
     @torch.no_grad()
@@ -196,7 +207,7 @@ class GlobalScorer(_Scorer):
         g, self.keys = global_knn_graph(coords, min(n - 1, round(0.5 * n), self.k_max))
         src, dst = g.edge_index.numpy().copy()                   # Data.to() moves the tensors in place
         start = time.perf_counter()
-        p = torch.sigmoid(self.model(g.to(self.device)))
+        p = edge_probs(self.model, g.to(self.device), self.chunk)
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
         self.net_seconds += time.perf_counter() - start
