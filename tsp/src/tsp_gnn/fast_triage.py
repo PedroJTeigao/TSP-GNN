@@ -61,15 +61,31 @@ def batch_knn_graph(pts):
 
 
 @torch.no_grad()
-def batch_heat(model, device, pts, max_windows=4096):
-    """(W, m, m) symmetric probability matrices of the windows (as hier.Heatmaps) and the network time (s)."""
+def edge_probs(model, data, chunk):
+    """sigmoid(model(data)) with the edge head applied in chunks of `chunk` edges (same values as model(data); on a
+    10k instance the head's (E, 3 · hidden) input alone is ~0.8 GiB)."""
+    h, e = model.encode(data)
+    src, dst = data.edge_index
+    out = [model.head(torch.cat([h[src[lo:lo + chunk]], h[dst[lo:lo + chunk]], e[lo:lo + chunk]], dim=-1))
+           for lo in range(0, src.numel(), chunk)]
+    return torch.sigmoid(torch.cat(out).squeeze(-1))
+
+
+MAX_NODES = 4096       # nodes per network call in batch_heat (GPU memory; windows of up to 100 cities)
+
+
+@torch.no_grad()
+def batch_heat(model, device, pts, max_windows=None):
+    """(W, m, m) symmetric probability matrices of the windows (as hier.Heatmaps) and the network time (s).
+    Windows go to the network in chunks of max_windows (default: MAX_NODES // m), the edge head in edge chunks."""
     W, m, _ = pts.shape
+    max_windows = max_windows or max(1, MAX_NODES // m)
     heat = np.zeros((W, m, m))
     net = 0.0
     for lo in range(0, W, max_windows):
         g, (w, s, t) = batch_knn_graph(pts[lo:lo + max_windows])
         start = time.perf_counter()
-        p = torch.sigmoid(model(g.to(device)))
+        p = edge_probs(model, g.to(device), 131072)
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         net += time.perf_counter() - start
@@ -179,17 +195,6 @@ def global_knn_graph(coords, k):
     edge_index = torch.from_numpy(np.stack([s, t]).astype(np.int64))
     edge_attr = (x[edge_index[0]] - x[edge_index[1]]).norm(dim=1, keepdim=True)
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr), keys
-
-
-@torch.no_grad()
-def edge_probs(model, data, chunk):
-    """sigmoid(model(data)) with the edge head applied in chunks of `chunk` edges (same values as model(data); on a
-    10k instance the head's (E, 3 · hidden) input alone is ~0.8 GiB)."""
-    h, e = model.encode(data)
-    src, dst = data.edge_index
-    out = [model.head(torch.cat([h[src[lo:lo + chunk]], h[dst[lo:lo + chunk]], e[lo:lo + chunk]], dim=-1))
-           for lo in range(0, src.numel(), chunk)]
-    return torch.sigmoid(torch.cat(out).squeeze(-1))
 
 
 class GlobalScorer(_Scorer):

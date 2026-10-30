@@ -75,8 +75,10 @@ def main():
     parser.add_argument("--seed", type=int, required=True, help="TAGCN K=3 seed")
     parser.add_argument("--features-root", default="results/phase3_learned_triage/features")
     parser.add_argument("--out-root", default="results/phase3_learned_triage/models")
+    parser.add_argument("--test-sets", nargs="+", default=list(TEST_SETS))
     args = parser.parse_args()
-    data = {name: load(args.features_root, args.seed, name) for name in TRAIN_SETS + TEST_SETS}
+    test_sets = tuple(args.test_sets)
+    data = {name: load(args.features_root, args.seed, name) for name in TRAIN_SETS + test_sets}
 
     # instance split: the same instances on each side for every seed
     tr, va = {}, {}
@@ -112,21 +114,23 @@ def main():
         best[kind] = (model, params)
         results[kind] = {"params": params, "val_ap": val, "val_ap_mean": mean_ap,
                          "test_ap": {nm: ap(data[nm]["improves"], score(model, kind, matrix(data[nm], L.FEATURES)))
-                                     for nm in TEST_SETS},
+                                     for nm in test_sets},
                          "grid": [{"params": p, "val_ap_mean": m} for m, p, _, _ in trials]}
     chosen = max(results, key=lambda k: results[k]["val_ap_mean"])
     model, params = best[chosen]
 
     ablations = {}
     for extra in L.EXTRA:
+        if any(extra not in data[nm] for nm in data):                 # e.g. no beam logp in the w-size logs
+            continue
         cols = L.FEATURES + (extra,)
         m, val = fit_eval(chosen, params, cols)
         ablations[extra] = {"val_ap": val, "test_ap": {nm: ap(data[nm]["improves"], score(m, chosen,
-                                                          matrix(data[nm], cols))) for nm in TEST_SETS}}
+                                                          matrix(data[nm], cols))) for nm in test_sets}}
 
     # raw signals on the same windows (validation halves and full test sets)
     raw = {}
-    for nm in TRAIN_SETS + TEST_SETS:
+    for nm in TRAIN_SETS + test_sets:
         mask = va[nm] if nm in TRAIN_SETS else np.ones(len(data[nm]["improves"]), dtype=bool)
         y = data[nm]["improves"][mask]
         raw[nm] = {"disagreement": ap(y, data[nm]["disagreement"][mask]),
@@ -149,7 +153,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     joblib.dump({"model": model, "kind": chosen, "features": L.FEATURES, "params": params}, os.path.join(out_dir, "chosen.joblib"))
     metrics = {"meta": {"git_commit": commit, "git_dirty": dirty, "date": datetime.date.today().isoformat(),
-                        "seed": args.seed, "train_sets": TRAIN_SETS, "test_sets": TEST_SETS,
+                        "seed": args.seed, "train_sets": TRAIN_SETS, "test_sets": test_sets,
                         "split_seed": SPLIT_SEED, "features": L.FEATURES,
                         "train_windows": {nm: int(tr[nm].sum()) for nm in TRAIN_SETS}},
                "chosen": chosen, "models": results, "ablations": ablations, "raw": raw,
