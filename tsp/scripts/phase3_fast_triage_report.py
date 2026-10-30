@@ -44,6 +44,8 @@ POLICIES = {
     "global_learned": ("Learned (retrained), global B", ROOT + "/e2_b", "global_learned_seed{s}",
                        "global_learned_top{x}"),
     "seq_random": ("Random (5 seeds), sequential", ROOT + "/seq", "random", "random_s{s}_top{x}"),
+    "seq_after_random": ("Random (5 seeds), sequential, repeated at the end", ROOT + "/seq_after", "random",
+                         "random_s{s}_top{x}"),
     "seq_fast_disagreement": ("Disagreement, batched A, sequential", ROOT + "/seq", "fast_disagreement_seed{s}",
                               "fast_disagreement_top{x}"),
     "seq_fast_learned": ("Learned, batched A, sequential", ROOT + "/seq", "fast_learned_seed{s}", "fast_learned_top{x}"),
@@ -59,7 +61,7 @@ def npz(path):
 
 def runs_of(name, key, x):
     label, root, folder, pk = POLICIES[key]
-    if key in ("random", "seq_random"):
+    if key in ("random", "seq_random", "seq_after_random"):
         r = npz(os.path.join(root, folder, f"{name}.npz"))
         return [] if r is None else [(r, pk.format(s=s, x=x)) for s in RANDOM_SEEDS
                                      if pk.format(s=s, x=x) + "__gap" in r]
@@ -170,7 +172,7 @@ def table_policy(keys):
 
 def table_same_time(keys):
     lines = ["| Set | Policy (sorted by time of the run together) | Time, together (s) | Time, sequential (s) | "
-             "Gap (%) |", "|---|---|---|---|---|"]
+             "Time, sequential, random repeated at the end (s) | Gap (%) |", "|---|---|---|---|---|---|"]
     for name in SETS:
         rows = []
         for key in keys:
@@ -179,9 +181,12 @@ def table_same_time(keys):
                 if p is None:
                     continue
                 q = policy(name, "seq_" + key, x) if "seq_" + key in POLICIES else None
-                rows.append((p["s"], q["s"] if q else None, p["per_inst"].mean(), f"{POLICIES[key][0]}, top {x} %"))
-        for sec, seq, gap, label in sorted(rows):
-            lines.append(f"| {name} | {label} | {sec:.2f} | {f'{seq:.2f}' if seq is not None else '—'} | {gap:.3f} |")
+                r = policy(name, "seq_after_" + key, x) if "seq_after_" + key in POLICIES else None
+                rows.append((p["s"], q["s"] if q else None, r["s"] if r else None, p["per_inst"].mean(),
+                             f"{POLICIES[key][0]}, top {x} %"))
+        fmt = lambda v: f"{v:.2f}" if v is not None else "—"
+        for sec, seq, again, gap, label in sorted(rows):
+            lines.append(f"| {name} | {label} | {sec:.2f} | {fmt(seq)} | {fmt(again)} | {gap:.3f} |")
     lines += ["", "*Together*: random and the batched scores run at the same time (7 processes; B: random + B "
               "processes, Fu-10k B one at a time). *Sequential* (Fu-10k only): one process at a time, no other "
               "process of ours running; machine load in the table below. Gaps are the same in both runs (same "
@@ -190,10 +195,10 @@ def table_same_time(keys):
 
 
 def table_load():
-    p = os.path.join(ROOT, "seq", "load.tsv")
-    if not os.path.exists(p):
+    paths = [os.path.join(ROOT, d, "load.tsv") for d in ("seq", "seq_after")]
+    rows = [line.rstrip("\n").split("\t") for p in paths if os.path.exists(p) for line in list(open(p))[1:]]
+    if not rows:
         return ["missing"]
-    rows = [line.rstrip("\n").split("\t") for line in open(p)][1:]
     lines = ["| Run | Load average before (1 / 5 / 15 min) | after | GPU used by other processes before / after (MiB) |",
              "|---|---|---|---|"]
     runs = {}
