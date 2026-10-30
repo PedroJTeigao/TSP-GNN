@@ -43,6 +43,10 @@ POLICIES = {
                             "global_disagreement_top{x}"),
     "global_learned": ("Learned (retrained), global B", ROOT + "/e2_b", "global_learned_seed{s}",
                        "global_learned_top{x}"),
+    "seq_random": ("Random (5 seeds), sequential", ROOT + "/seq", "random", "random_s{s}_top{x}"),
+    "seq_fast_disagreement": ("Disagreement, batched A, sequential", ROOT + "/seq", "fast_disagreement_seed{s}",
+                              "fast_disagreement_top{x}"),
+    "seq_fast_learned": ("Learned, batched A, sequential", ROOT + "/seq", "fast_learned_seed{s}", "fast_learned_top{x}"),
     "disagreement": ("Disagreement, per window (previous run)", OLD, "disagreement_seed{s}", "disagreement_top{x}"),
     "learned": ("Learned, per window (previous run)", OLD, "learned_seed{s}", "learned_top{x}"),
     "oracle": ("Oracle: real LKH gain (previous run)", OLD, "oracle", "oracle_top{x}"),
@@ -55,7 +59,7 @@ def npz(path):
 
 def runs_of(name, key, x):
     label, root, folder, pk = POLICIES[key]
-    if key == "random":
+    if key in ("random", "seq_random"):
         r = npz(os.path.join(root, folder, f"{name}.npz"))
         return [] if r is None else [(r, pk.format(s=s, x=x)) for s in RANDOM_SEEDS
                                      if pk.format(s=s, x=x) + "__gap" in r]
@@ -165,16 +169,39 @@ def table_policy(keys):
 
 
 def table_same_time(keys):
-    lines = ["| Set | Policy (sorted by time) | Time (s) | Gap (%) |", "|---|---|---|---|"]
+    lines = ["| Set | Policy (sorted by time of the run together) | Time, together (s) | Time, sequential (s) | "
+             "Gap (%) |", "|---|---|---|---|---|"]
     for name in SETS:
         rows = []
         for key in keys:
             for x in FRACS:
                 p = policy(name, key, x)
-                if p is not None:
-                    rows.append((p["s"], p["per_inst"].mean(), f"{POLICIES[key][0]}, top {x} %"))
-        for sec, gap, label in sorted(rows):
-            lines.append(f"| {name} | {label} | {sec:.2f} | {gap:.3f} |")
+                if p is None:
+                    continue
+                q = policy(name, "seq_" + key, x) if "seq_" + key in POLICIES else None
+                rows.append((p["s"], q["s"] if q else None, p["per_inst"].mean(), f"{POLICIES[key][0]}, top {x} %"))
+        for sec, seq, gap, label in sorted(rows):
+            lines.append(f"| {name} | {label} | {sec:.2f} | {f'{seq:.2f}' if seq is not None else '—'} | {gap:.3f} |")
+    lines += ["", "*Together*: random and the batched scores run at the same time (7 processes; B: random + B "
+              "processes, Fu-10k B one at a time). *Sequential* (Fu-10k only): one process at a time, no other "
+              "process of ours running; machine load in the table below. Gaps are the same in both runs (same "
+              "seeds, deterministic)."]
+    return lines
+
+
+def table_load():
+    p = os.path.join(ROOT, "seq", "load.tsv")
+    if not os.path.exists(p):
+        return ["missing"]
+    rows = [line.rstrip("\n").split("\t") for line in open(p)][1:]
+    lines = ["| Run | Load average before (1 / 5 / 15 min) | after | GPU used by other processes before / after (MiB) |",
+             "|---|---|---|---|"]
+    runs = {}
+    for when, run, l1, l5, l15, g in rows:
+        runs.setdefault(run, {})[when] = (f"{l1} / {l5} / {l15}", g)
+    for run, d in runs.items():
+        b, a = d.get("before", ("—", "—")), d.get("after", ("—", "—"))
+        lines.append(f"| {run} | {b[0]} | {a[0]} | {b[1]} / {a[1]} |")
     return lines
 
 
@@ -234,6 +261,7 @@ def main():
              "### Policy outcome: batched A against per-window", "", *table_identity(), "",
              "## Policies (E2 protocol)", "", *table_policy(keys + ["disagreement", "learned", "oracle"]), "",
              "### Same time", "", *table_same_time(keys), "",
+             "Machine load during the sequential run (Fu-10k):", "", *table_load(), "",
              "### Paired tests", "", *table_tests(), "",
              "## Diagnostic: LKH time of the network policies", "", *table_diag(), ""]
     open(OUT, "w").write("\n".join(lines) + "\n")
