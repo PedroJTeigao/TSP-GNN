@@ -132,6 +132,47 @@ def sequence(wh, start, stops, station, method, cache=None):
     return out, sec
 
 
+def open_path(metric, stops, station, method="lkh", cache=None):
+    """The order on its own, from no particular start: (first cell, length to the station). Node 0 is a free start."""
+    key = ("open", tuple(stops), station, method)
+    if cache is not None and key in cache:
+        return cache[key]
+    pts = list(stops) + [station]
+    maps = [metric.dist_to(p) for p in pts]
+    dist = [[0] * (len(pts) + 1)] + [[0] + [m[q] for q in pts] for m in maps]
+    last = max(map(max, dist))
+    dist[0][-1] = dist[-1][0] = 2 * last + 1              # the free start does not jump to the station
+    order = SOLVERS[method](dist)
+    out = (stops[order[0] - 1], path_length(dist, [0] + order + [len(dist) - 1]))
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def route(metric, wh, start, group, method, cache=None):
+    """The trip of a robot that takes the orders of group: ([(shelf, owner)], [(station, order id)], seconds). The owner is
+    an order id, or a tuple for a shelf of both orders. With two orders the shelves come first, then both stations, in the
+    cheaper of the two ways, so no delivery precedes a pick."""
+    if len(group) == 1:
+        o = group[0]
+        idx, sec = sequence(metric, start, [wh.access[s] for s in o.shelves], o.station, method, cache)
+        return [(o.shelves[k], o.oid) for k in idx], [(o.station, o.oid)], sec
+    a, b = group
+    shelves = sorted(set(a.shelves) | set(b.shelves))
+    owner = {s: (a.oid, b.oid) if s in a.shelves and s in b.shelves else (a.oid if s in a.shelves else b.oid) for s in shelves}
+    cells = [wh.access[s] for s in shelves]
+    best, spent = None, 0.0
+    for x, y in ((a, b), (b, a)) if a.station != b.station else ((a, b),):
+        idx, sec = sequence(metric, start, cells, x.station, method, cache)
+        spent += sec
+        d = matrix(metric, start, cells, x.station)
+        size = path_length(d, [0] + [k + 1 for k in idx] + [len(d) - 1])
+        if best is None or size < best[0]:
+            best = (size, idx, x, y)
+    _, idx, x, y = best
+    return [(shelves[k], owner[shelves[k]]) for k in idx], [(x.station, x.oid), (y.station, y.oid)], spent
+
+
 def assign_robot(wh, free_robots, positions, stop_cells):
     """The documented rule: the free robot closest to the order's shelf closest to it (ties: lowest robot id). The first
     shelf of the visit depends on the robot, so "the first shelf" is read as the shelf nearest that robot. To be improved:

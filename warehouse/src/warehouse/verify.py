@@ -51,10 +51,10 @@ def check_rule(rule, traj, orders, picks, done, w):
     raise ValueError(f"unknown rule {kind!r}")
 
 
-def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600, cut=False):
+def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600, cut=False, capacity=1):
     """orders: dicts with oid, products, station, arrival. shelf_of[p]: shelf index of a product; shelves[k]: its (row, col).
     cut: a horizon stopped the episode, so a started order may lack its delivery; its picks are still judged and it counts as open.
-    Returns {"ok", "problems": {name: count}, metrics}."""
+    capacity: orders a robot may carry at once. Returns {"ok", "problems": {name: count}, metrics}."""
     traj = np.asarray(traj)
     w = grid.shape[1]
     problems = {}
@@ -112,7 +112,11 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
         spans.setdefault(ass["robot"], []).append((ass["t"], end))
     for s in spans.values():
         s.sort()
-        wrong["overlap"] += sum(b[0] < a[1] for a, b in zip(s, s[1:]))
+        active = []
+        for start, end in s:
+            active = [x for x in active if x > start]
+            wrong["overlap"] += len(active) >= capacity
+            active.append(end)
     problems.update({f"wrong_{k}": v for k, v in wrong.items()})
     rule_breaks = sum(check_rule(r, traj, orders, picks, done, w) for r in rules)
     problems["rules_broken"] = rule_breaks

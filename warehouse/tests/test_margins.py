@@ -1,0 +1,199 @@
+"""Assignment rules, distances with traffic and trips with two orders (phase B0)."""
+
+import itertools
+from collections import deque
+
+import numpy as np
+import pytest
+
+from warehouse import conflicts as C
+from warehouse import dispatch as D
+from warehouse import env as W
+from warehouse import sequencing as S
+from warehouse import sim
+from warehouse import traffic as T
+from warehouse import verify as V
+
+LAY = W.Layout("tiny", 12, 16, 2, 2, corridor=1, stations=2, robots=4)
+
+
+@pytest.fixture(scope="module")
+def world():
+    wh = W.Warehouse(LAY)
+    cat = W.Catalogue(wh, 200, 3)
+    return wh, cat, W.batch_orders(wh, cat, 12, 3)
+
+
+def judge(wh, cat, orders, ep, capacity=1):
+    return V.verify(ep["traj"], wh.grid, [o.__dict__ for o in orders], cat.shelf_of, wh.shelves, ep["events"], ep["service"],
+                    ep["step_seconds"], capacity=capacity)
+
+
+def brute(cost):
+    """Minimum total cost of giving each row its own column, trying everything."""
+    n, m = cost.shape
+    return min(sum(cost[i, j] for i, j in enumerate(p)) for p in itertools.permutations(range(m), n))
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_hungarian_matches_brute_force(world, seed):
+    wh, cat, orders = world
+    rng = np.random.default_rng(seed)
+    free = rng.choice(4, 3, replace=False).tolist()
+    pos = rng.choice(wh.free, 4, replace=False).tolist()
+    h = D.Hungarian(wh, method="exact")
+    pool = deque(orders[:6])
+    cost = h.costs(free, list(pool), pos)
+    got = h.choose(0, list(free), pool, pos)
+    assert len(got) == 3 and len(pool) == 3 and len({r for r, _ in got}) == 3
+    index = {o.oid: j for j, o in enumerate(orders[:6])}
+    assert sum(cost[free.index(r), index[g[0].oid]] for r, g in got) == brute(cost)
+
+
+def test_hungarian_cost_is_distance_plus_length(world):
+    wh, cat, orders = world
+    h = D.Hungarian(wh, method="exact")
+    o = orders[0]
+    first, length = h.profile(o)
+    pos = {2: wh.free[5]}
+    assert h.costs([2], [o], pos)[0, 0] == wh.dist_to(first)[wh.free[5]] + length
+
+
+def test_open_path_is_the_best_free_start(world):
+    wh, cat, orders = world
+    o = next(o for o in orders if 3 <= len(o.shelves) <= 6)
+    stops = [wh.access[s] for s in o.shelves]
+    first, length = S.open_path(wh, stops, o.station, "lkh")
+    assert first in stops
+    best = min(sum(wh.dist_to(a)[b] for a, b in zip(p, p[1:] + (o.station,))) for p in itertools.permutations(stops))
+    assert length == best
+
+
+def test_fifo_only_looks_at_the_oldest(world):
+    wh, cat, orders = world
+    pool = deque(orders[:6])
+    got = D.Hungarian(wh, method="exact", fifo=True).choose(0, [0, 1], pool, list(wh.free[:4]))
+    assert {g[0].oid for _, g in got} == {orders[0].oid, orders[1].oid}
+
+
+@pytest.mark.parametrize("reassign", [False, True])
+def test_hungarian_episode_passes_the_verifier(world, reassign):
+    wh, cat, orders = world
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.Hungarian(wh, method="2opt", reassign=reassign))
+    rep = judge(wh, cat, orders, ep)
+    assert rep["ok"] and rep["delivered"] == 12
+
+
+def test_reassigning_changes_robots_that_have_not_started():
+    wh = W.Warehouse(LAY)
+    cat = W.Catalogue(wh, 200, 5)
+    orders = W.batch_orders(wh, cat, 30, 5)
+    plain = sim.run_episode(wh, cat, orders, "2opt", "pibt", 5, dispatcher=D.Hungarian(wh, method="2opt"))
+    again = sim.run_episode(wh, cat, orders, "2opt", "pibt", 5, dispatcher=D.Hungarian(wh, method="2opt", reassign=True))
+    count = lambda ep: sum(e["kind"] == "assign" for e in ep["events"])
+    assert count(plain) == 30 and count(again) > 30
+    assert judge(wh, cat, orders, again)["ok"]
+
+
+def test_fixed_plan_repeats_the_episode(world):
+    wh, cat, orders = world
+    a = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3)
+    plan = {}
+    for e in a["events"]:
+        if e["kind"] == "assign":
+            plan.setdefault(e["robot"], []).append(e["order"])
+    b = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.FixedPlan(plan))
+    assert np.array_equal(a["traj"], b["traj"])
+
+
+def test_traffic_without_penalty_is_the_empty_grid(world):
+    wh = world[0]
+    m = T.Traffic(wh, np.zeros((wh.height, wh.width)))
+    for c in wh.free[::37]:
+        assert m.dist_to(c) == [T.SCALE * x if x > 0 else x for x in wh.dist_to(c)]
+
+
+def test_traffic_distances_are_symmetric(world):
+    wh = world[0]
+    m = T.Traffic(wh, np.random.default_rng(1).exponential(0.5, (wh.height, wh.width)))
+    cells = wh.free[::23]
+    for a, b in itertools.combinations(cells, 2):
+        assert m.dist_to(a)[b] == m.dist_to(b)[a]
+        assert m.dist_to(a)[b] >= T.SCALE * wh.dist_to(a)[b]
+
+
+def test_traffic_goes_around_a_jam():
+    grid = W.Warehouse(W.Layout("open", 12, 16, 1, 1, corridor=1, stations=1, robots=2))
+    a, b = grid.cell(0, 0), grid.cell(0, 6)                   # the top row is free
+    penalty = np.zeros((grid.height, grid.width))
+    penalty[0, 3] = 50.0
+    m = T.Traffic(grid, penalty)
+    assert grid.dist_to(a)[b] == 6
+    assert m.dist_to(a)[b] == T.SCALE * 8                     # two steps more, through row 1
+
+
+def test_lost_per_pass():
+    z = np.zeros((1, 3), dtype=np.int32)
+    res = {"waits": z + [2, 0, 0], "detours": z + [1, 0, 0], "visits": z + [6, 4, 0]}
+    assert T.lost_per_pass([res]).tolist() == [[1.0, 0.0, 0.0]]              # 3 lost in 3 passes
+
+
+def test_traffic_changes_the_visit_order(world):
+    wh, cat, orders = world
+    o = max(orders, key=lambda o: len(o.shelves))
+    stops = [wh.access[s] for s in o.shelves]
+    penalty = np.zeros((wh.height, wh.width))
+    r, c = wh.xy(stops[0])
+    penalty[r, :] = 30.0
+    m = T.Traffic(wh, penalty)
+    d = S.matrix(m, wh.free[0], stops, o.station)
+    assert all(isinstance(x, int) for row in d for x in row)
+    idx, _ = S.sequence(m, wh.free[0], stops, o.station, "lkh")
+    assert sorted(idx) == list(range(len(stops)))
+    best = min(S.path_length(d, [0, *p, len(d) - 1]) for p in itertools.permutations(range(1, len(d) - 1))) if len(stops) <= 7 else None
+    if best is not None:
+        assert S.path_length(d, [0] + [k + 1 for k in idx] + [len(d) - 1]) == best
+
+
+def test_episode_with_traffic_passes_the_verifier(world):
+    wh, cat, orders = world
+    base = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3)
+    m = T.Traffic(wh, T.lost_per_pass([C.analyse(wh, base["traj"], base["targets"])]))
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, metric=m)
+    assert judge(wh, cat, orders, ep)["ok"]
+
+
+def test_batcher_takes_the_largest_overlap(world):
+    wh, cat, orders = world
+    a = W.Order(0, [], wh.stations[0], 0, [1, 2, 3])
+    b = W.Order(1, [], wh.stations[0], 0, [7, 8, 9])
+    c = W.Order(2, [], wh.stations[1], 0, [2, 3, 9])
+    d = W.Order(3, [], wh.stations[0], 0, [1, 9, 10])
+    pool = deque([a, b, c, d])
+    got = D.Batcher(wh).choose(0, [0], pool, list(wh.free[:4]))
+    assert [o.oid for o in got[0][1]] == [0, 2] and [o.oid for o in pool] == [1, 3]
+
+
+def test_two_orders_share_a_trip(world):
+    wh, cat, orders = world
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.Batcher(wh))
+    rep = judge(wh, cat, orders, ep, capacity=2)
+    assert rep["ok"] and rep["delivered"] == 12
+    assert judge(wh, cat, orders, ep)["problems"]["wrong_overlap"] > 0
+
+
+def test_a_shared_shelf_serves_both_orders(world):
+    wh, cat, orders = world
+    shelf = orders[0].shelves[0]
+    twin = W.Order(1, orders[1].products, orders[1].station, 0, sorted({*orders[1].shelves, shelf}))
+    stops, deliveries, _ = S.route(wh, wh, wh.free[0], (orders[0], twin), "2opt", {})
+    assert dict(stops)[shelf] == (orders[0].oid, 1)
+    assert sorted(o for _, o in deliveries) == sorted((orders[0].oid, 1))
+    assert sorted(s for s, _ in stops) == sorted({*orders[0].shelves, *twin.shelves})
+
+
+@pytest.mark.parametrize("rule", ["far", "near", "load", "fixed"])
+def test_priority_rules(world, rule):
+    wh, cat, orders = world
+    ep = sim.run_episode(wh, cat, orders, "2opt", "pibt", 3, planner_args={"rule": rule})
+    assert judge(wh, cat, orders, ep)["ok"]

@@ -75,15 +75,33 @@ class PIBT:
 
     execute = 1
 
-    def __init__(self, wh, seed=0):
-        self.wh = wh
+    def __init__(self, wh, seed=0, rule="age"):
+        self.wh, self.rule = wh, rule
         self.rng = random.Random(seed)
+        self.fixed = None
+
+    def bonus(self, pos, queue):
+        """What rule adds to the age. The distance rules only break ties of age: as a real weight "far" livelocks, even at
+        half a point per cell (0 of 12 orders on a tiny grid)."""
+        R = len(pos)
+        if self.rule == "age":
+            return [0] * R
+        if self.rule == "fixed":
+            if self.fixed is None:
+                self.fixed = [self.rng.uniform(0, 50) for _ in range(R)]
+            return self.fixed
+        if self.rule == "load":
+            return [5 * len(q) for q in queue]
+        d = [self.wh.dist_to(q[0][0])[p] if q else 0 for q, p in zip(queue, pos)]
+        top = 2 * (max(d) + 1)                                     # below 1, with the eps of the caller
+        return [x / top for x in d] if self.rule == "far" else [-x / top for x in d]        # "near"
 
     def step(self, pos, hold, queue, age):
         wh, rng = self.wh, self.rng
         R = len(pos)
         eps = [rng.random() for _ in range(R)]
-        order = sorted(range(R), key=lambda i: -(age[i] + eps[i]))
+        bonus = self.bonus(pos, queue)
+        order = sorted(range(R), key=lambda i: -(age[i] + bonus[i] + eps[i]))
         here = {p: i for i, p in enumerate(pos)}
         nxt = [None] * R
         taken = {}
