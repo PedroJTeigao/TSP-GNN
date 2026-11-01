@@ -32,8 +32,9 @@ METHODS = ("nn", "2opt", "lkh")
 PLANNERS = ("pibt", "prioritized", "cbs")
 CBS_ARGS = {"time_limit": 30.0, "budget": 900.0}
 RATES = {"loose": 0.5, "medium": 0.8, "saturated": 1.2}
-SWEEP = (0.9, 1.0, 1.1)                         # extra rates, to place the point where a method stops keeping up
+SWEEP = (0.9, 1.0, 1.1, 1.3, 1.4, 1.5, 1.7, 2.0)   # extra rates, to place the point where a method stops keeping up
 LIFELONG_STEPS = 2000
+E2_DIR = "e2b"                                  # e2/ is the first run, whose verifier took orders cut by the horizon for errors
 SEQ_ORDERS = 200
 
 
@@ -76,14 +77,14 @@ def run_e1(job):
 
 def run_e2(job):
     size, name, rate, planner, seed = job
-    path = f"{OUT}/e2/{size}_{name}_{planner}_{seed}"
+    path = f"{OUT}/{E2_DIR}/{size}_{name}_{planner}_{seed}"
     if os.path.exists(path + ".json"):
         return path
     wh, cat = world(size, seed)
     orders = W.poisson_orders(wh, cat, rate, LIFELONG_STEPS, seed)
     t0 = time.perf_counter()
     ep = sim.run_episode(wh, cat, orders, "lkh", planner, seed, stop_at=LIFELONG_STEPS)
-    rep = V.verify(ep["traj"], wh.grid, as_dict(orders), cat.shelf_of, wh.shelves, ep["events"], ep["service"], ep["step_seconds"])
+    rep = V.verify(ep["traj"], wh.grid, as_dict(orders), cat.shelf_of, wh.shelves, ep["events"], ep["service"], ep["step_seconds"], cut=True)
     save(path, ep, rep, {"size": size, "rate_name": name, "rate": rate, "planner": planner, "seed": seed,
                          "arrivals": [o.arrival for o in orders], "elapsed": time.perf_counter() - t0})
     return path
@@ -153,7 +154,7 @@ def main():
     p.add_argument("what", choices=("seq", "e1", "e2", "e3", "gif"))
     p.add_argument("--workers", type=int, default=4)
     args = p.parse_args()
-    for d in ("e1", "e2"):
+    for d in ("e1", E2_DIR):
         os.makedirs(f"{OUT}/{d}", exist_ok=True)
     os.makedirs("docs/figures", exist_ok=True)
     if args.what == "seq":

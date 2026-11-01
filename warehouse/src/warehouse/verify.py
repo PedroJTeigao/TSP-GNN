@@ -51,8 +51,9 @@ def check_rule(rule, traj, orders, picks, done, w):
     raise ValueError(f"unknown rule {kind!r}")
 
 
-def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600):
+def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600, cut=False):
     """orders: dicts with oid, products, station, arrival. shelf_of[p]: shelf index of a product; shelves[k]: its (row, col).
+    cut: a horizon stopped the episode, so a started order may lack its delivery; its picks are still judged and it counts as open.
     Returns {"ok", "problems": {name: count}, metrics}."""
     traj = np.asarray(traj)
     w = grid.shape[1]
@@ -66,7 +67,7 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
         if e["kind"] in ("pick", "deliver"):
             by_order.setdefault(e["order"], []).append(e)
 
-    done, picks = {}, {}
+    done, picks, open_orders = {}, {}, {}
     wrong = {"pick": 0, "delivery": 0, "dwell": 0, "overlap": 0}
 
     def dwelt(e):
@@ -79,12 +80,12 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
         o = book[oid]
         ass = assigned.get(oid)
         delivery = [e for e in evs if e["kind"] == "deliver"]
-        if ass is None or len(delivery) != 1:
+        if ass is None or len(delivery) > 1 or (not delivery and not cut):
             wrong["delivery"] += 1
             continue
-        d = delivery[0]
+        d = delivery[0] if delivery else None
         wrong["dwell"] += sum(not dwelt(e) for e in evs)
-        if d["robot"] != ass["robot"] or d["cell"] != o["station"]:
+        if d is not None and (d["robot"] != ass["robot"] or d["cell"] != o["station"]):
             wrong["delivery"] += 1
         seen = {}
         for e in evs:
@@ -93,9 +94,12 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
             r, c = divmod(e["cell"], w)
             sr, sc = shelves[e["shelf"]]
             good = e["robot"] == ass["robot"] and abs(r - sr) + abs(c - sc) == 1 and e["start"] >= o["arrival"] and \
-                e["start"] >= ass["t"] and e["end"] <= d["start"]
+                e["start"] >= ass["t"] and (d is None or e["end"] <= d["start"])
             wrong["pick"] += not good
             seen[e["shelf"]] = e["end"]
+        if d is None:
+            open_orders[oid] = len(traj) - 1
+            continue
         for p in o["products"]:
             if shelf_of[p] not in seen:
                 wrong["pick"] += 1
@@ -103,9 +107,9 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
                 picks[(oid, p)] = seen[shelf_of[p]]
         done[oid] = d["end"]
     spans = {}
-    for oid in done:
+    for oid, end in {**done, **open_orders}.items():
         ass = assigned[oid]
-        spans.setdefault(ass["robot"], []).append((ass["t"], done[oid]))
+        spans.setdefault(ass["robot"], []).append((ass["t"], end))
     for s in spans.values():
         s.sort()
         wrong["overlap"] += sum(b[0] < a[1] for a, b in zip(s, s[1:]))
@@ -118,7 +122,7 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
     T = len(traj) - 1
     secs = np.asarray(step_seconds, dtype=np.float64)
     q = np.percentile(secs, [50, 95]) if len(secs) else (0.0, 0.0)
-    return {"ok": not any(problems.values()), "problems": problems, "orders": len(orders), "delivered": len(done),
+    return {"ok": not any(problems.values()), "problems": problems, "orders": len(orders), "delivered": len(done), "open": len(open_orders),
             "steps": T, "makespan": float(ends.max()) if len(ends) else float("nan"), "sum_completion": float(ends.sum()),
             "mean_delay": float(delays.mean()) if len(delays) else float("nan"),
             "orders_per_hour": len(done) / max(T, 1) * steps_per_hour, "step_ms_p50": 1e3 * float(q[0]),

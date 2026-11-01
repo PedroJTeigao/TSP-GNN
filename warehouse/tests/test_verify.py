@@ -85,6 +85,25 @@ def test_wrong_station(run):
     assert check(run, orders=other)["problems"]["wrong_delivery"] == 1
 
 
+def test_order_cut_by_the_horizon(run):
+    wh, cat, o, ep = run
+    last = max(e["end"] for e in ep["events"] if e["kind"] == "deliver")
+    gone = [e for e in ep["events"] if e.get("end", -1) < last]            # the last delivery has not happened yet
+    cut = sum(e["kind"] == "deliver" and e["end"] == last for e in ep["events"])
+    assert check(run, events=gone)["problems"]["wrong_delivery"] == cut
+    rep = V.verify(ep["traj"], wh.grid, o, cat.shelf_of, wh.shelves, gone, ep["service"], ep["step_seconds"], cut=True)
+    assert rep["ok"] and rep["open"] == cut and rep["delivered"] == 6 - cut
+
+
+def test_cut_still_judges_the_picks(run):
+    wh, cat, o, ep = run
+    last = next(e for e in ep["events"] if e["kind"] == "deliver" and e["end"] == max(x["end"] for x in ep["events"] if x["kind"] == "deliver"))
+    gone = [dict(e) for e in ep["events"] if e is not last]
+    next(e for e in gone if e["kind"] == "pick" and e["order"] == last["order"])["start"] -= 1
+    rep = V.verify(ep["traj"], wh.grid, o, cat.shelf_of, wh.shelves, gone, ep["service"], ep["step_seconds"], cut=True)
+    assert not rep["ok"] and rep["problems"]["wrong_dwell"] >= 1
+
+
 def test_rules(run):
     ep = run[3]
     start = int(ep["traj"][0, 0])
