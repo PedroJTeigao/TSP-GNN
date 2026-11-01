@@ -416,7 +416,8 @@ def main():
     out += ["Rules rejected by the code check, by reason (all levels, both n):", "", table_rejects(), "",
             "## Step 3: the larger model on the older tasks", "",
             "The 7B column is computed on the same cases from the runs of steps 0b and 2.", "", step3(), "",
-            section(notes, "Step 3"), "", "## Caveats", "", section(notes, "Caveats"), ""]
+            section(notes, "Step 3"), "", "## Hybrid arms: p1 first, q14 when p1 leaves rules uncovered", "", section(notes, "Hybrid"), "",
+            open(f"{OUT}/hybrid_tables.md").read().strip(), "", "## Caveats", "", section(notes, "Caveats"), ""]
     with open("docs/phase5_open_language_report.md", "w") as f:
         f.write("\n".join(out))
     print("saved to docs/phase5_open_language_report.md")

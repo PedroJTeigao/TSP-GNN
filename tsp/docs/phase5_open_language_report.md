@@ -367,6 +367,103 @@ The 7B column is computed on the same cases from the runs of steps 0b and 2.
 
 qwen3:14b is clearly better on the planner V0 (25/40 against 0/40), on formalisation (98 % and 86 % of the rules against 86 % and 64 %) and on the verifier with the code report (88 % of the routes right against 68 %). It ties on planner V3 (35/40). On the plain verifier it finds more of the injected errors (77 % against 35 %) but raises more false alarms (71 % against 50 %), and the route verdict stays at 40 %, so it does not replace the code check. The latency is 2–3 times the 7B one, and about 9 times on planner V0. These 14B times are not comparable with the 7B ones in detail: the planner and formalisation calls ran with LKH-3 of part C in parallel on a hot GPU, the verifier calls ran alone but hot, and the 7B times come from earlier runs on a cooler card.
 
+## Hybrid arms: p1 first, q14 when p1 leaves rules uncovered
+
+Computed offline from the logged answers: no model and no LKH-3 ran. h1 sends a whole text to q14 if p1 leaves a constraint sentence without a valid rule, or has fewer valid rules than constraint sentences; the check uses only the text and the output of p1 (`src/tsp_gnn/open_hybrid.py`). The stock phrase p1 deletes counts as a constraint sentence when it has an order, adjacency, time or zone word. The trigger was fixed on the held-out development texts before the test texts were scored, and p1 stayed frozen. h2 joins the answers of p1 and q14, p1 first, and is scored after the code check, which keeps the first rule on a contradiction.
+
+**h1 keeps what p1 does well and adds part of what q14 does well: it sends no L0 or L1 text to the LLM, so it matches p1 there, and on L2 at n = 200 it gets 64.2 % of the rules against 54.7 % for p1 (p = 0.0066) but stays below q14 at 70.9 % (p = 0.031), while at n = 1000 its 63.0 % ties with both (p ≥ 0.36) at about half of the LLM calls.** The limit is the trigger: 43 of the 95 L2 texts p1 gets wrong are kept with p1, because they have the right number of rules with wrong content. h2 does not beat q14 on exact rules or instances on L2, and its route rate stays open: 68 of its rule sets have no route in the logs and were not run, so its bounds are wide, and the rates over known routes favour simple sets. Times: "LLM s, alone" is the share sent times the mean of q14 measured alone in that cell (5 calls), "LLM s, run" is the logged time on a hot GPU, and the h2 solver time covers known routes only, so it is understated. These tests are not corrected for multiple comparisons.
+
+All texts:
+
+| n | level | arm | texts | rules exact % [95 % CI] | instances exact % [95 % CI] | valid routes % [95 % CI] (routes) | sent to the LLM % | LLM s, alone | LLM s, run | LLM + LKH s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 200 | L0 | p1 | 30 | 98.2 [90.6, 99.7] | 96.7 [83.3, 99.4] | 96.7 [83.3, 99.4] (30) | 0.0 | 0.0 | 0.0 | 0.3 |
+| 200 | L0 | q14 | 30 | 94.6 [85.4, 98.2] | 90.0 [74.4, 96.5] | 90.0 [74.4, 96.5] (30) | 100.0 | 3.6 | 8.9 | 4.8 |
+| 200 | L0 | h1 | 30 | 98.2 [90.6, 99.7] | 96.7 [83.3, 99.4] | 96.7 [83.3, 99.4] (30) | 0.0 | 0.0 | 0.0 | 0.3 |
+| 200 | L0 | h2 | 30 | 98.2 [90.6, 99.7] | 93.3 [78.7, 98.2] | 100.0 [87.9, 100.0] (28); bounds 93.3–100.0 over 30 | 100.0 | 3.6 | 8.9 | 3.6 |
+| 200 | L1 | p1 | 60 | 100.0 [97.5, 100.0] | 100.0 [94.0, 100.0] | 100.0 [94.0, 100.0] (60) | 0.0 | 0.0 | 0.0 | 0.0 |
+| 200 | L1 | q14 | 60 | 80.4 [73.3, 86.0] | 61.7 [49.0, 72.9] | 88.3 [77.8, 94.2] (60) | 100.0 | 8.4 | 22.8 | 15.3 |
+| 200 | L1 | h1 | 60 | 100.0 [97.5, 100.0] | 100.0 [94.0, 100.0] | 100.0 [94.0, 100.0] (60) | 0.0 | 0.0 | 0.0 | 0.0 |
+| 200 | L1 | h2 | 60 | 85.8 [79.3, 90.5] | 66.7 [54.1, 77.3] | 100.0 [92.3, 100.0] (46); bounds 76.7–100.0 over 60 | 100.0 | 8.4 | 22.8 | 11.1 |
+| 200 | L2 | p1 | 60 | 54.7 [46.7, 62.5] | 18.3 [10.6, 29.9] | 63.3 [50.7, 74.4] (60) | 0.0 | 0.0 | 0.0 | 16.8 |
+| 200 | L2 | q14 | 60 | 70.9 [63.2, 77.7] | 35.0 [24.2, 47.6] | 80.0 [68.2, 88.2] (60) | 100.0 | 9.1 | 24.9 | 28.9 |
+| 200 | L2 | h1 | 60 | 64.2 [56.2, 71.5] | 31.7 [21.3, 44.2] | 73.3 [61.0, 82.9] (60) | 48.3 | 4.4 | 11.6 | 25.2 |
+| 200 | L2 | h2 | 60 | 70.3 [62.5, 77.0] | 30.0 [19.9, 42.5] | 88.4 [75.5, 94.9] (43); bounds 63.3–91.7 over 60 | 100.0 | 9.1 | 24.9 | 26.3 |
+| 1000 | L0 | p1 | 30 | 97.0 [89.8, 99.2] | 93.3 [78.7, 98.2] | 96.7 [83.3, 99.4] (30) | 0.0 | 0.0 | 0.0 | 4.4 |
+| 1000 | L0 | q14 | 30 | 82.1 [71.3, 89.4] | 70.0 [52.1, 83.3] | 73.3 [55.6, 85.8] (30) | 100.0 | 7.0 | 15.2 | 72.1 |
+| 1000 | L0 | h1 | 30 | 97.0 [89.8, 99.2] | 93.3 [78.7, 98.2] | 96.7 [83.3, 99.4] (30) | 0.0 | 0.0 | 0.0 | 4.4 |
+| 1000 | L0 | h2 | 30 | 89.6 [80.0, 94.8] | 76.7 [59.1, 88.2] | 95.8 [79.8, 99.3] (24); bounds 76.7–96.7 over 30 | 100.0 | 7.0 | 15.2 | 7.2 |
+| 1000 | L1 | p1 | 60 | 100.0 [97.4, 100.0] | 100.0 [94.0, 100.0] | 100.0 [88.6, 100.0] (30) | 0.0 | 0.0 | 0.0 | 0.0 |
+| 1000 | L1 | q14 | 60 | 75.3 [67.8, 81.6] | 50.0 [37.7, 62.3] | 73.3 [55.6, 85.8] (30) | 100.0 | 12.3 | 28.5 | 96.2 |
+| 1000 | L1 | h1 | 60 | 100.0 [97.4, 100.0] | 100.0 [94.0, 100.0] | 100.0 [88.6, 100.0] (30) | 0.0 | 0.0 | 0.0 | 0.0 |
+| 1000 | L1 | h2 | 60 | 81.5 [74.4, 87.0] | 55.0 [42.5, 66.9] | 100.0 [81.6, 100.0] (17); bounds 56.7–100.0 over 30 | 100.0 | 12.3 | 28.5 | 20.2 |
+| 1000 | L2 | p1 | 60 | 60.3 [52.2, 67.9] | 23.3 [14.4, 35.4] | 56.7 [39.2, 72.6] (30) | 0.0 | 0.0 | 0.0 | 70.7 |
+| 1000 | L2 | q14 | 60 | 59.6 [51.5, 67.2] | 13.3 [6.9, 24.2] | 60.0 [42.3, 75.4] (30) | 100.0 | 19.6 | 29.8 | 169.1 |
+| 1000 | L2 | h1 | 60 | 63.0 [54.9, 70.4] | 16.7 [9.3, 28.0] | 66.7 [48.8, 80.8] (30) | 53.3 | 10.5 | 15.3 | 145.3 |
+| 1000 | L2 | h2 | 60 | 59.6 [51.5, 67.2] | 11.7 [5.8, 22.2] | 71.4 [45.4, 88.3] (14); bounds 33.3–86.7 over 30 | 100.0 | 19.6 | 29.8 | 149.6 |
+
+Without the 17 L2 texts the audit found wrong (L2 only):
+
+| n | level | arm | texts | rules exact % [95 % CI] | instances exact % [95 % CI] | valid routes % [95 % CI] (routes) | sent to the LLM % | LLM s, alone | LLM s, run | LLM + LKH s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 200 | L2 | p1 | 51 | 55.2 [46.5, 63.6] | 19.6 [11.0, 32.5] | 60.8 [47.1, 73.0] (51) | 0.0 | 0.0 | 0.0 | 16.5 |
+| 200 | L2 | q14 | 51 | 72.8 [64.4, 79.8] | 37.3 [25.3, 51.0] | 80.4 [67.5, 89.0] (51) | 100.0 | 9.1 | 25.0 | 27.8 |
+| 200 | L2 | h1 | 51 | 64.8 [56.1, 72.6] | 33.3 [22.0, 47.0] | 72.5 [59.1, 82.9] (51) | 47.1 | 4.3 | 11.6 | 25.5 |
+| 200 | L2 | h2 | 51 | 71.2 [62.7, 78.4] | 31.4 [20.3, 45.0] | 89.2 [75.3, 95.7] (37); bounds 64.7–92.2 over 51 | 100.0 | 9.1 | 25.0 | 24.8 |
+| 1000 | L2 | p1 | 52 | 61.6 [52.8, 69.7] | 26.9 [16.8, 40.3] | 60.0 [40.7, 76.6] (25) | 0.0 | 0.0 | 0.0 | 78.2 |
+| 1000 | L2 | q14 | 52 | 60.8 [52.0, 68.9] | 13.5 [6.7, 25.3] | 56.0 [37.1, 73.3] (25) | 100.0 | 19.6 | 29.4 | 187.2 |
+| 1000 | L2 | h1 | 52 | 65.6 [56.9, 73.4] | 17.3 [9.4, 29.7] | 68.0 [48.4, 82.8] (25) | 55.8 | 10.9 | 15.8 | 166.2 |
+| 1000 | L2 | h2 | 52 | 60.0 [51.2, 68.2] | 11.5 [5.4, 23.0] | 72.7 [43.4, 90.3] (11); bounds 32.0–88.0 over 25 | 100.0 | 19.6 | 29.4 | 171.1 |
+
+McNemar, h1 against q14:
+
+| n | level | rules: h1 only / q14 only | p | routes: h1 only / q14 only | p |
+|---|---|---|---|---|---|
+| 200 | L0 | 2 / 0 | 0.5 | 2 / 0 | 0.5 |
+| 200 | L1 | 29 / 0 | 3.73e-09 | 7 / 0 | 0.0156 |
+| 200 | L2 | 4 / 14 | 0.0309 | 3 / 7 | 0.344 |
+| 1000 | L0 | 12 / 2 | 0.0129 | 8 / 1 | 0.0391 |
+| 1000 | L1 | 36 / 0 | 2.91e-11 | 8 / 0 | 0.00781 |
+| 1000 | L2 | 12 / 7 | 0.359 | 4 / 2 | 0.688 |
+
+McNemar, h1 against p1:
+
+| n | level | rules: h1 only / p1 only | p | routes: h1 only / p1 only | p |
+|---|---|---|---|---|---|
+| 200 | L0 | 0 / 0 | 1 | 0 / 0 | 1 |
+| 200 | L1 | 0 / 0 | 1 | 0 / 0 | 1 |
+| 200 | L2 | 19 / 5 | 0.00661 | 9 / 3 | 0.146 |
+| 1000 | L0 | 0 / 0 | 1 | 0 / 0 | 1 |
+| 1000 | L1 | 0 / 0 | 1 | 0 / 0 | 1 |
+| 1000 | L2 | 14 / 10 | 0.541 | 5 / 2 | 0.453 |
+
+McNemar without the 17 texts, L2, h1 against q14:
+
+| n | level | rules: h1 only / q14 only | p | routes: h1 only / q14 only | p |
+|---|---|---|---|---|---|
+| 200 | L2 | 3 / 13 | 0.0213 | 3 / 7 | 0.344 |
+| 1000 | L2 | 11 / 5 | 0.21 | 4 / 1 | 0.375 |
+
+McNemar without the 17 texts, L2, h1 against p1:
+
+| n | level | rules: h1 only / p1 only | p | routes: h1 only / p1 only | p |
+|---|---|---|---|---|---|
+| 200 | L2 | 16 / 4 | 0.0118 | 9 / 3 | 0.146 |
+| 1000 | L2 | 12 / 7 | 0.359 | 4 / 2 | 0.688 |
+
+What the trigger did (exact instances):
+
+| n | level | texts | sent | p1 exact among the sent | q14 exact among the sent | p1 exact among the kept | p1 wrong and kept |
+|---|---|---|---|---|---|---|---|
+| 200 | L0 | 30 | 0 | 0 | 0 | 29 | 1 |
+| 200 | L1 | 60 | 0 | 0 | 0 | 60 | 0 |
+| 200 | L2 | 60 | 29 | 1 | 9 | 10 | 21 |
+| 1000 | L0 | 30 | 0 | 0 | 0 | 28 | 2 |
+| 1000 | L1 | 60 | 0 | 0 | 0 | 60 | 0 |
+| 1000 | L2 | 60 | 32 | 8 | 4 | 6 | 22 |
+
+h2 rule sets with no route in the logs, which would need a new LKH-3 run (not run): 68 (n = 200 L0: 2; n = 200 L1: 14; n = 200 L2: 17; n = 1000 L0: 6; n = 1000 L1: 13; n = 1000 L2: 16).
+
 ## Caveats
 
 - **Time budget.** The main run took 9 h 17 min, not the 6 h aimed for (the log clock jumps back an hour at 02:00, when daylight saving ended). The overrun was q14t, whose calls took more than twice the step-0 time on L2, and LKH-3 at n = 1000. The verifier of step 3 crashed on a bug of mine and was rerun alone after the main run, about 35 min more.
