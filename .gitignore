@@ -9,3 +9,5 @@ tmp/
 __pycache__/
 .pytest_cache/
 tsp/third_party/
+warehouse/data/
+warehouse/results/
