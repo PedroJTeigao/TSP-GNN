@@ -11,6 +11,8 @@ orders it gives out from pending.
                 that adds the least walking (rule "near");
     Clusters    trips decided before the episode (batching.py), the first ones to the nearest free robot;
     Iterative   the nearest rule, then a robot changes order while that lowers its cost, or two robots swap;
+    LiveBatches trips of up to cap orders by Clarke & Wright on the orders of the moment, in lifelong mode: at once, after a wait,
+                or knowing the arrivals of the next steps;
     LiveCosts   Hungarian on the traffic seen so far in the episode: distance plus the decayed wait per edge, or distance plus
                 gamma times the delay near the first goal, with gamma fitted on the trips already done.
 """
@@ -18,6 +20,7 @@ orders it gives out from pending.
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from warehouse import batching as B
 from warehouse import sequencing as S
 from warehouse import traffic as T
 
@@ -181,6 +184,60 @@ class Clusters:
             r = S.assign_robot(self.metric, free, pos, [self.wh.access[s] for o in group for s in o.shelves])
             free.remove(r)
             out.append((r, group))
+        return out
+
+
+class LiveBatches:
+    """wait: a trip leaves once its oldest order is that old. future, horizon: arrivals known in advance, up to horizon steps ahead;
+    a trip can hold a robotless place for an order still to come, and each step of waiting that a merge forces on an order counts
+    lam steps of walking. A trip with an order still to come is fixed when its first order would leave, so nothing waits for more
+    than the horizon. window: orders looked at, oldest first, which bounds the cost of the savings in a long queue."""
+    reassign = False
+
+    def __init__(self, wh, cost, cap, wait=0, future=(), horizon=0, lam=0.0, window=200):
+        self.wh, self.cost, self.cap, self.wait = wh, cost, cap, wait
+        self.ahead, self.horizon, self.lam, self.window = sorted(future, key=lambda o: (o.arrival, o.oid)), horizon, lam, window
+        self.fixed = []
+        self.taken = set()
+
+    def penalty(self, t):
+        def forced(a, b):
+            ends = [max(max(o.arrival, t) for o in g) for g in (a, b)]
+            top = max(ends)
+            return self.lam * (len(a) * (top - ends[0]) + len(b) * (top - ends[1]))
+        return forced
+
+    def choose(self, t, free, pending, pos):
+        if not free or not pending:
+            return []
+        here = {o.oid for o in pending}
+        out = []
+
+        def leave(group):
+            for o in group:
+                pending.remove(o)
+            r = S.assign_robot(self.wh, free, pos, [self.wh.access[s] for o in group for s in o.shelves])
+            free.remove(r)
+            out.append((r, tuple(group)))
+
+        for group in [g for g in self.fixed if all(o.oid in here for o in g)]:
+            if free:
+                self.fixed.remove(group)
+                leave(group)
+        if not free:
+            return out
+        loose = [o for o in pending if o.oid not in self.taken][:self.window]
+        soon = [o for o in self.ahead if t < o.arrival <= t + self.horizon and o.oid not in self.taken][:self.window]
+        places = len(free)
+        for group in sorted(B.savings(loose + soon, self.cost, self.cap, self.penalty(t)), key=lambda g: (min(o.arrival for o in g), min(o.oid for o in g))):
+            if places == 0 or not any(o.oid in here for o in group) or t - min(o.arrival for o in group) < self.wait:
+                continue
+            places -= 1
+            if all(o.oid in here for o in group):
+                leave(group)
+            else:
+                self.fixed.append(group)
+                self.taken |= {o.oid for o in group}
         return out
 
 

@@ -22,8 +22,9 @@ Order picking plus multi-agent path finding on a grid. Phase A is a simulator wi
 | `docs/phaseA_notes.md` | the hand-written parts of the report |
 | `scripts/phaseB0_margins.py`, `scripts/phaseB0_report.py` | experiments of phase B0, and `docs/phaseB0_margins.md` with its figure |
 | `docs/phaseB0_notes.md` | the hand-written parts of that report |
+| `scripts/phaseB0b_margins.py`, `scripts/phaseB0b_report.py`, `docs/phaseB0b_notes.md` | the same for phase B0b: capacity, arrivals and density |
 
-Results go to `results/warehouse/phaseA/` and `results/warehouse/phaseB0/`, which is outside git. Figures are in `docs/figures/`.
+Results go to `results/warehouse/phaseA/`, `results/warehouse/phaseB0/` and `results/warehouse/phaseB0b/`, which is outside git. Figures are in `docs/figures/`.
 
 ## Commands
 
@@ -45,6 +46,9 @@ scripts/run_phaseB0_revised.sh                   # phase B0: O3, O1, O2, free fl
 python scripts/phaseB0_margins.py o3x            # one arm or stage; see the top of the script
 python scripts/phaseB0_margins.py ggo_base       # the baseline on the two seeds of GGO-lite
 python scripts/phaseB0_report.py                 # report and figure
+
+scripts/run_phaseB0b.sh                          # phase B0b; needs the E1 runs of phase A
+python scripts/phaseB0b_report.py                # report and figure
 ```
 
 A stopped command resumes: finished runs are skipped.

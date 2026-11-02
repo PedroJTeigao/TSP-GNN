@@ -1,5 +1,6 @@
 """Assignment rules, distances with traffic and trips with two orders (phase B0)."""
 
+import dataclasses
 import itertools
 from collections import deque
 
@@ -364,3 +365,60 @@ def test_insertion_gives_every_order(world):
     assert sorted(o for v in plan.values() for o in v) == sorted(o.oid for o in orders)
     ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.FixedPlan(plan))
     assert judge(wh, cat, orders, ep)["ok"]
+
+
+def test_cvrp_capacity_3_gives_trips_the_verifier_accepts(world, tmp_path):
+    wh, cat, orders = world
+    cost = B.TripCost(wh, wh, 3)
+    groups = B.cvrp_lkh(orders, cost, str(tmp_path), limit=2, capacity=3, trips=True)
+    assert sorted(o.oid for g in groups for o in g) == sorted(o.oid for o in orders) and max(map(len, groups)) <= 3
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.Clusters(wh, groups))
+    assert judge(wh, cat, orders, ep, capacity=3)["ok"]
+
+
+def test_partition_never_loses_to_its_seeds(world):
+    wh, cat, orders = world
+    cost = B.TripCost(wh, wh, 3)
+    seeds = B.savings(orders, cost, 3)
+    groups, info = B.partition(orders, cost, 3, 4, seeds=seeds)
+    assert B.total(groups, cost) <= B.total(seeds, cost)
+    assert sorted(o.oid for g in groups for o in g) == sorted(o.oid for o in orders)
+    assert info["bound"] <= B.total(groups, cost) + 1e-6
+
+
+def test_partition_with_all_partners_is_the_matching(world):
+    wh, cat, orders = world
+    cost = B.TripCost(wh, wh, 3)
+    groups, _ = B.partition(orders, cost, 2, len(orders))
+    assert B.total(groups, cost) == B.exact_pairs(orders, cost)
+
+
+def lifelong(wh, cat, gap=12):
+    return [dataclasses.replace(o, arrival=i * gap) for i, o in enumerate(W.batch_orders(wh, cat, 8, 5))]
+
+
+@pytest.mark.parametrize("args", [{}, {"wait": 20}, {"horizon": 40}, {"horizon": 1000, "lam": 0.5}])
+def test_live_batches_pass_the_verifier_and_deliver_everything(world, args):
+    wh, cat, _ = world
+    orders = lifelong(wh, cat)
+    args = {**args, "future": orders} if "horizon" in args else args
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.LiveBatches(wh, B.TripCost(wh, wh, 3), 3, **args))
+    rep = judge(wh, cat, orders, ep, capacity=3)
+    assert rep["ok"] and rep["delivered"] == len(orders)
+
+
+def test_wait_holds_an_order_until_it_is_old_enough(world):
+    wh, cat, _ = world
+    orders = lifelong(wh, cat)
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.LiveBatches(wh, B.TripCost(wh, wh, 3), 3, wait=20))
+    got = {e["order"]: e["t"] for e in ep["events"] if e["kind"] == "assign"}
+    assert all(got[o.oid] >= o.arrival for o in orders) and got[orders[0].oid] >= 20
+
+
+def test_future_orders_are_not_given_out_before_they_arrive(world):
+    wh, cat, _ = world
+    orders = lifelong(wh, cat, gap=30)
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.LiveBatches(wh, B.TripCost(wh, wh, 3), 3, future=orders, horizon=90))
+    got = {e["order"]: e["t"] for e in ep["events"] if e["kind"] == "assign"}
+    assert all(got[o.oid] >= o.arrival for o in orders)
+    assert len({got[o.oid] for o in orders}) < len(orders)          # some trip waited for an order still to come
