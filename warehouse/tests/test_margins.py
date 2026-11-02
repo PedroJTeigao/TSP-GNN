@@ -6,9 +6,11 @@ from collections import deque
 import numpy as np
 import pytest
 
+from warehouse import batching as B
 from warehouse import conflicts as C
 from warehouse import dispatch as D
 from warehouse import env as W
+from warehouse import insertion as I
 from warehouse import sequencing as S
 from warehouse import sim
 from warehouse import traffic as T
@@ -196,4 +198,169 @@ def test_a_shared_shelf_serves_both_orders(world):
 def test_priority_rules(world, rule):
     wh, cat, orders = world
     ep = sim.run_episode(wh, cat, orders, "2opt", "pibt", 3, planner_args={"rule": rule})
+    assert judge(wh, cat, orders, ep)["ok"]
+
+
+def test_edge_metric_is_directed():
+    wh = W.Warehouse(LAY)
+    a, b = wh.cell(0, 0), wh.cell(0, 1)
+    m = T.EdgeMetric(wh, {(a, b): 7.0})
+    assert m.dist_to(b)[a] == 3 * T.SCALE                     # around, by row 1, is cheaper than 8 steps
+    assert m.dist_to(a)[b] == T.SCALE
+
+
+def test_edge_metric_without_extra_is_the_empty_grid():
+    wh = W.Warehouse(LAY)
+    m = T.EdgeMetric(wh, {})
+    for c in wh.free[::37]:
+        assert m.dist_to(c) == [T.SCALE * x if x > 0 else x for x in wh.dist_to(c)]
+
+
+def test_edge_metric_symmetric_for_lkh():
+    wh = W.Warehouse(LAY)
+    rng = np.random.default_rng(2)
+    extra = {(c, n): float(rng.exponential(1.0)) for c in wh.free[::3] for n in wh.neighbours[c]}
+    m = T.EdgeMetric(wh, extra, symmetric=True)
+    for a, b in itertools.combinations(wh.free[::29], 2):
+        assert m.dist_to(a)[b] == m.dist_to(b)[a]
+
+
+def test_edge_metric_matches_dijkstra_by_hand():
+    wh = W.Warehouse(LAY)
+    rng = np.random.default_rng(3)
+    extra = {(c, n): float(rng.integers(0, 4)) for c in wh.free for n in wh.neighbours[c]}
+    m = T.EdgeMetric(wh, extra)
+    goal = wh.free[40]
+    d = m.dist_to(goal)
+    for c in wh.free:                                         # Bellman's equation at every cell
+        if c != goal:
+            assert d[c] == min(m.edge(c, n) + d[n] for n in wh.neighbours[c])
+
+
+def test_edge_stats_charge_the_next_pass():
+    wh = W.Warehouse(LAY)
+    a, b, c = wh.cell(0, 0), wh.cell(0, 1), wh.cell(0, 2)
+    s = T.EdgeStats(wh, decay=0.9)
+    s.observe([a], [a], [c])                                  # waits twice, then passes
+    s.observe([a], [a], [c])
+    s.observe([a], [b], [c])
+    s.observe([b], [c], [c])
+    assert s.edges[(a, b)] == [1, 2, 2.0] and s.edges[(b, c)] == [1, 0, 0.0]
+    assert s.cells[a] == [1, 2, 2.0]
+
+
+def test_edge_stats_decay():
+    wh = W.Warehouse(LAY)
+    s = T.EdgeStats(wh, decay=0.9)
+    for lost in (2, 0, 1):
+        s.add(s.edges, (1, 2), lost)
+    assert s.edges[(1, 2)][:2] == [3, 3]
+    assert s.edges[(1, 2)][2] == pytest.approx(0.9 * (0.9 * 2) + 0.1)
+
+
+def test_edge_stats_add_up_to_the_losses(world):
+    wh, cat, orders = world
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3)
+    x = T.edge_stats(wh, ep["traj"], ep["targets"]).export()
+    a = C.analyse(wh, ep["traj"], ep["targets"])
+    assert 0 < x["edge_lost"].sum() <= a["lost"]              # losses after the last pass of a leg stay unpaid
+    assert (x["edge_delta"] >= 0).all()
+    assert x["edge_lost"].sum() == x["cell_lost"].sum()
+
+
+def test_free_flow_is_the_trip_alone(world):
+    wh, cat, orders = world
+    real = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3)
+    plan = D.plan_of(real["events"])
+    ff = sim.run_episode(wh, cat, orders, "2opt", "free", 3, dispatcher=D.FixedPlan(plan))
+    rep = judge(wh, cat, orders, ff)
+    assert {k for k, v in rep["problems"].items() if v} <= {"vertex_conflicts", "edge_conflicts"}
+    assert rep["delivered"] == 12
+    assert rep["makespan"] <= judge(wh, cat, orders, real)["makespan"]
+
+
+def test_plan_of_keeps_trips_of_two():
+    ev = [{"kind": "assign", "robot": 1, "order": 3, "t": 0}, {"kind": "assign", "robot": 1, "order": 2, "t": 0},
+          {"kind": "assign", "robot": 0, "order": 5, "t": 0}, {"kind": "assign", "robot": 1, "order": 5, "t": 4},
+          {"kind": "pick", "robot": 1, "order": 5, "t": 9}]
+    assert D.plan_of(ev) == {1: [[2, 3], [5]]}
+
+
+def test_iterative_reaches_a_local_optimum(world):
+    wh, cat, orders = world
+    pool = deque(orders[:6])
+    it = D.Iterative(wh, method="exact")
+    free, pos = [0, 1, 2], list(wh.free[:4])
+    cost = it.costs(free, list(pool), pos)
+    got = it.choose(0, list(free), pool, pos)
+    index = {o.oid: j for j, o in enumerate(orders[:6])}
+    pairs = [(free.index(r), index[g[0].oid]) for r, g in got]
+    spare = set(range(6)) - {j for _, j in pairs}
+    for i, j in pairs:
+        assert all(cost[i, q] >= cost[i, j] for q in spare)
+        assert all(cost[i, j] + cost[k, q] <= cost[i, q] + cost[k, j] for k, q in pairs)
+
+
+@pytest.mark.parametrize("mode", ["edge", "near"])
+def test_live_costs_episode(world, mode):
+    wh, cat, orders = world
+    d = D.LiveCosts(wh, mode, method="2opt")
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=d)
+    assert judge(wh, cat, orders, ep)["ok"]
+    assert d.stats.edges
+
+
+def test_savings_merges_what_saves_most(world):
+    wh, cat, orders = world
+    cost = B.TripCost(wh, wh, 3)
+    groups = B.savings(orders, cost, 2)
+    assert sorted(o.oid for g in groups for o in g) == sorted(o.oid for o in orders)
+    assert all(len(g) <= 2 for g in groups)
+    assert B.total(groups, cost) <= sum(cost([o]) for o in orders)
+
+
+def test_savings_against_matching_and_cvrp(world, tmp_path):
+    wh, cat, orders = world
+    cost = B.TripCost(wh, wh, 3)
+    best = B.exact_pairs(orders, cost)
+    assert best <= B.total(B.savings(orders, cost, 2), cost)
+    assert B.cvrp_lkh(orders, cost, str(tmp_path)) == best
+
+
+def test_exact_clusters_cover_every_order_once(world):
+    wh, cat, orders = world
+    groups = B.exact_clusters(orders, B.TripCost(wh, wh, 3))
+    assert sorted(o.oid for g in groups for o in g) == sorted(o.oid for o in orders) and max(map(len, groups)) <= 2
+
+
+@pytest.mark.parametrize("cap", [2, 3])
+def test_clusters_pass_the_verifier(world, cap):
+    wh, cat, orders = world
+    groups = B.savings(orders, B.TripCost(wh, wh, 3), cap)
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.Clusters(wh, groups))
+    assert judge(wh, cat, orders, ep, capacity=cap)["ok"]
+
+
+def test_regions_cover_every_order(world):
+    wh, cat, orders = world
+    groups = B.regions(wh, orders, 2, 3, 0)
+    assert sorted(o.oid for g in groups for o in g) == sorted(o.oid for o in orders)
+    assert all(len(g) <= 2 for g in groups)
+
+
+def test_highways_and_flow_are_verified(world):
+    wh, cat, orders = world
+    m = T.EdgeMetric(wh, T.crisscross(wh, [1.0], [1.0]))
+    assert m.extra
+    for args in ({"metric": m}, {"with_flow": 0.1, "against": 0.5}):
+        ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, planner_args=args)
+        assert judge(wh, cat, orders, ep)["ok"]
+
+
+def test_insertion_gives_every_order(world):
+    wh, cat, orders = world
+    ins = I.Insertion(wh, orders, W.start_cells(wh, 4, 3), 3, {})
+    plan = ins.build()
+    assert sorted(o for v in plan.values() for o in v) == sorted(o.oid for o in orders)
+    ep = sim.run_episode(wh, cat, orders, "2opt", "prioritized", 3, dispatcher=D.FixedPlan(plan))
     assert judge(wh, cat, orders, ep)["ok"]

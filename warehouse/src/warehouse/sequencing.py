@@ -157,20 +157,29 @@ def route(metric, wh, start, group, method, cache=None):
         o = group[0]
         idx, sec = sequence(metric, start, [wh.access[s] for s in o.shelves], o.station, method, cache)
         return [(o.shelves[k], o.oid) for k in idx], [(o.station, o.oid)], sec
-    a, b = group
-    shelves = sorted(set(a.shelves) | set(b.shelves))
-    owner = {s: (a.oid, b.oid) if s in a.shelves and s in b.shelves else (a.oid if s in a.shelves else b.oid) for s in shelves}
+    shelves = sorted({s for o in group for s in o.shelves})
+    owner = {}
+    for s in shelves:
+        who = tuple(o.oid for o in group if s in o.shelves)
+        owner[s] = who if len(who) > 1 else who[0]
     cells = [wh.access[s] for s in shelves]
     best, spent = None, 0.0
-    for x, y in ((a, b), (b, a)) if a.station != b.station else ((a, b),):
-        idx, sec = sequence(metric, start, cells, x.station, method, cache)
+    for way in delivery_orders(metric, group):
+        idx, sec = sequence(metric, start, cells, way[0].station, method, cache)
         spent += sec
-        d = matrix(metric, start, cells, x.station)
+        d = matrix(metric, start, cells, way[0].station)
         size = path_length(d, [0] + [k + 1 for k in idx] + [len(d) - 1])
+        size += sum(metric.dist_to(y.station)[x.station] for x, y in zip(way, way[1:]))
         if best is None or size < best[0]:
-            best = (size, idx, x, y)
-    _, idx, x, y = best
-    return [(shelves[k], owner[shelves[k]]) for k in idx], [(x.station, x.oid), (y.station, y.oid)], spent
+            best = (size, idx, way)
+    _, idx, way = best
+    return [(shelves[k], owner[shelves[k]]) for k in idx], [(o.station, o.oid) for o in way], spent
+
+
+def delivery_orders(metric, group):
+    """The orders of a trip in each order of their stations that is worth trying; orders of one station stay together."""
+    stations = list(dict.fromkeys(o.station for o in group))
+    return [[o for st in p for o in group if o.station == st] for p in itertools.permutations(stations)]
 
 
 def assign_robot(wh, free_robots, positions, stop_cells):

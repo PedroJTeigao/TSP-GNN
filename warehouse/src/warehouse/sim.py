@@ -57,6 +57,8 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
             started[i] = started[i] or kind == "pick"
             current[i] = {"kind": kind, "robot": i, "order": oid, "shelf": shelf, "cell": cell, "start": t, "end": t + dwell}
 
+    observe = getattr(dispatcher, "observe", lambda *_: None)
+
     def give(r, group, t):
         nonlocal seq_seconds
         stops, deliveries, sec = S.route(metric, wh, pos[r], group, method, cache)
@@ -108,6 +110,7 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
         nxt = list(buffered.popleft())
         secs.append(time.perf_counter() - tick)
         targets.append([-2 if hold[i] > 0 else (queue[i][0][0] if queue[i] else -1) for i in range(R)])
+        observe(t, pos, nxt, targets[-1])
         for i in range(R):
             assert hold[i] == 0 or nxt[i] == pos[i], f"robot {i} left its service at step {t}"
             if queue[i] and hold[i] == 0 and busy[i] is not None:

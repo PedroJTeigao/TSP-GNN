@@ -70,6 +70,46 @@ def search(nb, start, t0, goal, h, vertex, edge, horizon=None, stay=None, lock_g
     return None
 
 
+def search_weighted(nb, start, t0, goal, h, vertex, edge, cost, horizon, stay=None, lock_goal=False):
+    """search with a horizon, for the cheapest path rather than the fastest: a move u -> v costs 1 + cost(u, v), a wait 1.
+    h: lower bound on that cost to goal. A move into a robot's own stop is locked as in search."""
+    def free_after(t):
+        if stay is not None:
+            return all((goal, t + k) not in vertex for k in range(1, stay + 1))
+        return all((goal, k) not in vertex for k in range(t + 1, horizon + 1))
+
+    if (start, t0) in vertex:
+        return None
+    tie = 0
+    heap = [(h[start], 0, 0.0, t0, start)]
+    best, parent, closed = {(start, t0): 0.0}, {(start, t0): None}, set()
+    while heap:
+        _, _, g, t, v = heapq.heappop(heap)
+        if (v, t) in closed:
+            continue
+        closed.add((v, t))
+        if (v == goal and free_after(t)) or t == horizon:
+            path, node = [], (v, t)
+            while node is not None:
+                path.append(node[0])
+                node = parent[node]
+            return path[::-1]
+        t1 = t + 1
+        for u in nb[v] + [v]:
+            state = (u, t1)
+            if state in vertex or (v, u, t1) in edge:
+                continue
+            if lock_goal and u == goal and v != goal and not free_after(t1):
+                continue
+            g1 = g + 1 + (cost(v, u) if u != v else 0.0)
+            if g1 < best.get(state, float("inf")):
+                best[state] = g1
+                parent[state] = (v, t)
+                tie += 1
+                heapq.heappush(heap, (g1 + h[u], -tie, g1, t1, u))
+    return None
+
+
 class PIBT:
     """Priority inheritance with backtracking: h is the distance to the goal on the empty grid."""
 
@@ -145,12 +185,24 @@ def _goals(q, p):
 
 class Prioritized:
     """Plans horizon steps for every robot, by age, and executes the first execute; a failed robot goes first in the next
-    try, and after retries the step falls back on PIBT."""
+    try, and after retries the step falls back on PIBT.
 
-    def __init__(self, wh, horizon=20, execute=5, retries=3, seed=0):
+    Costs on the paths, all optional: metric is a directed traffic.EdgeMetric (highways); with, against charge a move for
+    each robot already planned in this call over the same edge, or over it the other way (flow, in the style of Guided PIBT)."""
+
+    def __init__(self, wh, horizon=20, execute=5, retries=3, seed=0, metric=None, with_flow=0.0, against=0.0):
         self.wh, self.horizon, self.execute, self.retries = wh, horizon, execute, retries
+        self.metric, self.with_flow, self.against = metric, with_flow, against
+        self.flow = {}
         self.pibt = PIBT(wh, seed)
         self.fallbacks = self.calls = 0
+
+    def bound(self, cell):
+        return self.metric.steps_to(cell) if self.metric is not None else self.wh.dist_to(cell)
+
+    def move_cost(self, u, v):
+        x = self.metric.extra.get((u, v), 0.0) if self.metric is not None else 0.0
+        return x + self.with_flow * self.flow.get((u, v), 0) + self.against * self.flow.get((v, u), 0)
 
     def route(self, i, pos, hold, queue, vertex, edge):
         """The cells of robot i for times 0..horizon, through its stops, or None."""
@@ -167,8 +219,12 @@ class Prioritized:
                 path += [cell] * min(dwell, w - t)
                 continue
             end = k == len(stops) - 1
-            seg = search(wh.neighbours, path[-1], len(path) - 1, cell, wh.dist_to(cell), vertex, edge, horizon=w,
-                         stay=None if end else dwell, lock_goal=True)
+            if self.metric is None and not (self.with_flow or self.against):
+                seg = search(wh.neighbours, path[-1], len(path) - 1, cell, wh.dist_to(cell), vertex, edge, horizon=w,
+                             stay=None if end else dwell, lock_goal=True)
+            else:
+                seg = search_weighted(wh.neighbours, path[-1], len(path) - 1, cell, self.bound(cell), vertex, edge, self.move_cost, w,
+                                      stay=None if end else dwell, lock_goal=True)
             if seg is None:
                 return None
             path += seg[1:]
@@ -185,6 +241,7 @@ class Prioritized:
         ranked = sorted(range(R), key=lambda i: (-age[i], i))
         for _ in range(self.retries + 1):
             vertex, edge, paths, failed = set(), set(), [None] * R, []
+            self.flow = {}
             for i in range(R):                          # the robots in service are fixed
                 vertex.update((pos[i], k) for k in range(hold[i] + 1) if hold[i] > 0)
             for i in ranked:
@@ -194,6 +251,10 @@ class Prioritized:
                     failed.append(i)
                     continue
                 paths[i] = p
+                if self.with_flow or self.against:
+                    for a, b in zip(p, p[1:]):
+                        if a != b:
+                            self.flow[(a, b)] = self.flow.get((a, b), 0) + 1
                 vertex.update((c, k) for k, c in enumerate(p))
                 edge.update((b, a, k + 1) for k, (a, b) in enumerate(zip(p, p[1:])))
             if not failed:
@@ -322,5 +383,23 @@ class WindowedCBS:
         return [[(p[k] if k < len(p) else p[-1]) for k in range(1, self.execute + 1)] for p in paths]
 
 
+class FreeFlow:
+    """Not a planner of real robots: each one walks a shortest path as if it were alone, so robots may share cells. It gives
+    the free-flow limit of an assignment, and its episodes only pass the verifier without the collision checks."""
+
+    def __init__(self, wh, seed=0):
+        self.wh = wh
+
+    def plan(self, t, pos, hold, queue, age):
+        out = []
+        for p, h, q in zip(pos, hold, queue):
+            if h > 0 or not q or q[0][0] == p:
+                out.append([p])
+            else:
+                d = self.wh.dist_to(q[0][0])
+                out.append([min(self.wh.neighbours[p], key=lambda v: (d[v], v))])
+        return out
+
+
 def make_planner(name, wh, seed=0, **kw):
-    return {"pibt": PIBT, "prioritized": Prioritized, "cbs": WindowedCBS}[name](wh, seed=seed, **kw)
+    return {"pibt": PIBT, "prioritized": Prioritized, "cbs": WindowedCBS, "free": FreeFlow}[name](wh, seed=seed, **kw)
