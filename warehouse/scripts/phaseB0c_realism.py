@@ -10,9 +10,11 @@ on prioritized under action dependencies, 5 seeds, every run judged by the verif
                e0 control, the same without the robot type
                f  oracle, hindsight: b + the real times of the last run of this seed, 3 runs
     calibrate  s and q_bad of r2, per cell of the design, on seeds of their own
+    trips      the trips of every seed
 
-The distances of an arm reach Clarke & Wright, the Hungarian, the visit order and the paths of the planner. Results in
-results/warehouse/phaseB0c/; a finished run is skipped.
+Trips are fixed per seed: Clarke & Wright on the plain distances for a, with turns for the rest (trips). Turns reach the Hungarian and
+the visit order; the delays of c to f reach them too, and the paths of the planner, without the turns: a field that ignores the heading
+of the robot sends PIBT on detours. Results in results/warehouse/phaseB0c/; a finished run is skipped.
 
     python scripts/phaseB0c_realism.py calibrate --workers 4
 """
@@ -40,6 +42,8 @@ CELLS = {"m30": ("medium", 30), "m90": ("medium", 90), "l60": ("large", 60)}
 SEEDS = range(5)
 CAL_SEEDS = (100, 101)
 CAL_ROUNDS = 5
+REFINE_SEEDS = range(100, 106)
+REFINE_ROUNDS = 5
 R1 = (0.10, 0.002)                              # p, q: about 11 % of steps lost to slips, 2.5 % to stops
 FIRST = {"p": 0.04, "q": 0.01}                  # where the calibration of r2 starts
 ORDERS_PER_ROBOT = 5
@@ -110,6 +114,21 @@ def known(wh, regime, traffic, kinds, tries):
     return out
 
 
+def trips_job(job):
+    cell, kind, seed = job
+    out = path("trips", cell, kind, seed) + ".json"
+    if not os.path.exists(out):
+        wh, _, orders = world(cell, seed)
+        groups = B.savings(orders, B.TripCost(wh, wh if kind == "plain" else E.TurnMetric(wh), sim.SERVICE), CAP)
+        P.write(out, [[o.oid for o in g] for g in groups])
+    return out
+
+
+def trips_of(cell, kind, seed, orders):
+    book = {o.oid: o for o in orders}
+    return [[book[k] for k in g] for g in json.load(open(path("trips", cell, kind, seed) + ".json"))]
+
+
 def distances(arm, cell, regime_name, regime, planner, seed, wh, extra=None):
     """(metric of layer 1 and of PIBT, the same for prioritized, the settings worth recording)."""
     if arm == "a":
@@ -130,22 +149,21 @@ def distances(arm, cell, regime_name, regime, planner, seed, wh, extra=None):
     fixed = T.EdgeMetric(wh, shared, symmetric=True)
     if arm == "e0" or regime.kinds == 1:
         return E.TurnMetric(wh, shared), fixed, {}
-    each = [E.TurnMetric(wh, x) for x in known(wh, regime, traffic, [[k] for k in every], tries)]
-    return E.Typed(each, E.TurnMetric(wh, shared), regime.kind), fixed, {}
+    costs = known(wh, regime, traffic, [[k] for k in every], tries)
+    return E.Typed([E.TurnMetric(wh, x) for x in costs], E.TurnMetric(wh, shared), regime.kind), E.Typed([T.EdgeMetric(wh, x, symmetric=True) for x in costs], fixed, regime.kind), {}
 
 
 def play(cell, regime_name, planner, seed, metric, route_metric):
     wh, cat, orders = world(cell, seed)
     regime = regime_of(regime_name, cell, wh)
-    t0 = time.perf_counter()
-    groups = B.savings(orders, B.TripCost(wh, metric or wh, sim.SERVICE), CAP)
-    cw = time.perf_counter() - t0
+    groups = trips_of(cell, "turn" if metric else "plain", seed, orders)
     ex = E.Execution(wh, wh.layout.robots, regime, seed)
-    args = {"metric": metric} if planner == "pibt" else ({"metric": route_metric} if route_metric else {})
+    field = route_metric.shared if planner == "prioritized" and isinstance(route_metric, E.Typed) else route_metric       # one table per plan
+    args = {"metric": field} if field else {}
     ep = sim.run_episode(wh, cat, orders, "lkh", planner, seed, metric=metric, dispatcher=D.TripHungarian(wh, groups, metric=metric), planner_args=args, execution=ex)
     rep = judged(wh, cat, orders, ep)
     assert rep["ok"] and rep["delivered"] == rep["orders"], (cell, regime_name, planner, seed, rep["problems"], rep["delivered"])
-    return wh, cat, orders, ex, ep, rep, cw
+    return wh, cat, orders, ex, ep, rep
 
 
 def free_flow(wh, cat, orders, seed, ep, metric):
@@ -158,8 +176,8 @@ def free_flow(wh, cat, orders, seed, ep, metric):
     return rep["makespan"]
 
 
-def summary(rep, ex, ep, cw, **extra):
-    return {"makespan": rep["makespan"], "mean_delay": rep["mean_delay"], "step_ms": rep["step_ms_mean"], "cw_seconds": cw, **ex.stats(),
+def summary(rep, ex, ep, **extra):
+    return {"makespan": rep["makespan"], "mean_delay": rep["mean_delay"], "step_ms": rep["step_ms_mean"], **ex.stats(),
             "fallbacks": ep["planner"]["fallbacks"], "calls": ep["planner"]["calls"], "seconds": ep["seconds"], "seq_seconds": ep["seq_seconds"], **extra}
 
 
@@ -183,19 +201,19 @@ def run(job):
         extra = T.pooled_extra([load_edges(cell, regime, planner, "b", seed, "all")])
         for _ in range(3):
             metric, route, _ = distances("f", cell, regime, None, planner, seed, wh, extra)
-            w, c, o, ex, ep, rep, cw = play(cell, regime, planner, seed, metric, route)
-            runs.append((rep["makespan"], len(runs), rep["mean_delay"], ex, ep, rep, cw, metric))
+            w, c, o, ex, ep, rep = play(cell, regime, planner, seed, metric, route)
+            runs.append((rep["makespan"], len(runs), rep["mean_delay"], ex, ep, rep, metric))
             extra = T.pooled_extra([edges_of(w, ep)[0]])
-        _, _, _, ex, ep, rep, cw, metric = min(runs, key=lambda q: q[:2])
+        _, _, _, ex, ep, rep, metric = min(runs, key=lambda q: q[:2])
         wh, cat, orders = w, c, o
         info = {"iterations": [q[0] for q in runs], "iteration_delays": [q[2] for q in runs]}
     else:
         metric, route, info = distances(arm, cell, regime, regime_of(regime, cell, wh), planner, seed, wh)
-        wh, cat, orders, ex, ep, rep, cw = play(cell, regime, planner, seed, metric, route)
+        wh, cat, orders, ex, ep, rep = play(cell, regime, planner, seed, metric, route)
         if arm in ("a", "b"):
             keep_edges(wh, ex, ep, cell, regime, planner, arm, seed)
     rec = {"cell": cell, "regime": regime, "planner": planner, "arm": arm, "seed": seed, "ok": True, "orders": rep["orders"], "robots": wh.layout.robots,
-           **summary(rep, ex, ep, cw, **info), "free_flow": free_flow(wh, cat, orders, seed, ep, metric), "elapsed": time.perf_counter() - t0, "commit": P.commit()}
+           **summary(rep, ex, ep, **info), "free_flow": free_flow(wh, cat, orders, seed, ep, metric), "elapsed": time.perf_counter() - t0, "commit": P.commit()}
     P.write(out, rec)
     return out
 
@@ -231,9 +249,28 @@ def calibrate(pool, cell):
     P.write(out, {"s": best["s"], "q_bad": best["q_bad"], "goal": goal, "history": history, "commit": P.commit()})
 
 
+def refine(pool, cell):
+    """Stops answer q_bad out of proportion and two seeds see few of them, so the first calibration can land far off: more seeds, and
+    half steps on q_bad, from where it stopped."""
+    name = path("cal", cell) + ".json"
+    cal = json.load(open(name))
+    if "refined" in cal:
+        return
+    seeds = REFINE_SEEDS
+    goal = rates(pool.map(cal_run, [(cell, "r1", 0, 0, k) for k in seeds]))
+    s, q, history = cal["s"], cal["q_bad"], []
+    for _ in range(REFINE_ROUNDS):
+        got = rates(pool.map(cal_run, [(cell, "r2", s, q, k) for k in seeds]))
+        history.append({"s": s, "q_bad": q, "slip": got[0], "stop": got[1]})
+        s, q = s * goal[0] / got[0], q * (goal[1] / got[1]) ** 0.5
+        print(f"{time.strftime('%H:%M:%S')} refine {cell} {history[-1]} goal {goal}", flush=True)
+    best = min(history, key=lambda h: abs(h["slip"] / goal[0] - 1) + abs(h["stop"] / goal[1] - 1))
+    P.write(name, {**cal, "s": best["s"], "q_bad": best["q_bad"], "goal": goal, "refined": history, "commit": P.commit()})
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("what", choices=("calibrate", "run"))
+    p.add_argument("what", choices=("calibrate", "trips", "run"))
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--cells", nargs="*", default=list(CELLS))
     p.add_argument("--regimes", nargs="*", default=["r1", "r2"])
@@ -242,11 +279,20 @@ def main():
     p.add_argument("--seeds", type=int, nargs="*", default=list(SEEDS))
     args = p.parse_args()
     os.makedirs(OUT, exist_ok=True)
+    if os.path.exists(path("STOP")):            # an older queue that was parked lets this stage pass
+        return
     with Pool(args.workers) as pool:
         if args.what == "calibrate":
             for c in args.cells:
                 calibrate(pool, c)
             return
+        if args.what == "trips":
+            for r in pool.imap_unordered(trips_job, [(c, k, s) for c in args.cells for k in ("plain", "turn") for s in SEEDS]):
+                print(f"{time.strftime('%H:%M:%S')} {r}", flush=True)
+            return
+        if "r2" in args.regimes:
+            for c in args.cells:
+                refine(pool, c)
         jobs = [(c, r, q, a, k) for c in args.cells for r in args.regimes for q in args.planners for a in args.arms for k in args.seeds if not (a == "e0" and r == "r1")]    # r1 has no types
         for n, r in enumerate(pool.imap_unordered(run, jobs), 1):
             print(f"{time.strftime('%H:%M:%S')} {n}/{len(jobs)} {r}", flush=True)
