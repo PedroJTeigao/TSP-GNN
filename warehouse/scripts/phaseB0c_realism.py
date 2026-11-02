@@ -279,8 +279,6 @@ def main():
     p.add_argument("--seeds", type=int, nargs="*", default=list(SEEDS))
     args = p.parse_args()
     os.makedirs(OUT, exist_ok=True)
-    if os.path.exists(path("STOP")):            # an older queue that was parked lets this stage pass
-        return
     with Pool(args.workers) as pool:
         if args.what == "calibrate":
             for c in args.cells:
