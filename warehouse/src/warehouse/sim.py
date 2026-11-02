@@ -22,13 +22,13 @@ SERVICE = 3                                     # steps at a shelf and at a stat
 
 
 def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_steps=30000, stop_at=None, robots=None,
-                planner_args=None, dispatcher=None, metric=None, cache=None, execution=None):
+                planner_args=None, dispatcher=None, metric=None, cache=None, execution=None, router=None):
     """Runs until every order is delivered, or until stop_at (lifelong mode), or max_steps. Returns the episode: traj (T+1,
     R) cells; targets (T, R) the cell each robot is heading to, -1 at rest, -2 in service; events; step_seconds; stats.
     dispatcher: who takes which orders (default: dispatch.Nearest). metric: the distances of layer 1, with dist_to like the
     Warehouse (default: the empty grid), one per robot if it has of; planners use the empty grid unless planner_args says otherwise.
     cache: visit orders kept across episodes. planner: a name, or a planner. execution: an exec.Execution between the plan and the
-    cells (default: the plan happens exactly)."""
+    cells (default: the plan happens exactly). router: sequencing.route with the step as well, for rules on the visit order."""
     R = robots or wh.layout.robots
     metric = metric or wh
     dispatcher = dispatcher or D.Nearest(wh, metric)
@@ -65,7 +65,8 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
 
     def give(r, group, t):
         nonlocal seq_seconds
-        stops, deliveries, sec = S.route(metric.of(r) if hasattr(metric, "of") else metric, wh, pos[r], group, method, cache)
+        table = metric.of(r) if hasattr(metric, "of") else metric
+        stops, deliveries, sec = router(table, wh, pos[r], group, method, cache, t) if router else S.route(table, wh, pos[r], group, method, cache)
         seq_seconds += sec
         busy[r], carried[r], started[r] = len(group), group, False
         queue[r] = [(wh.access[s], service, "pick", owner, s) for s, owner in stops]

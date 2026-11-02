@@ -113,6 +113,8 @@ class Order:
     station: int                  # cell of the delivery station
     arrival: int                  # step at which the order arrives
     shelves: list = field(default_factory=list)  # distinct shelf indices of the products
+    customer: str = ""            # phase C
+    priority: str = "normal"      # phase C: normal or urgent
 
 
 class Catalogue:

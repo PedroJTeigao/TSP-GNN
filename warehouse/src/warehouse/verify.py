@@ -7,7 +7,8 @@ import the simulator, the planners or the Warehouse class. Checks:
     every product of every delivered order was picked by the robot of that order, standing next to its shelf for the whole
     service time, after the arrival of the order and before the delivery, and the delivery happened at the right station;
     a robot does not carry two orders at once;
-    the extra rules (phase C): forbidden cells, an order of products inside an order, deadlines;
+    the rules of a request (phase C): forbidden cells, an order of shelves inside a trip, orders kept apart, robots and stations of
+    an order, deadlines;
     with rotation: a robot never changes direction between two moves without a step in place for the turn.
 """
 
@@ -42,7 +43,8 @@ def sharp_turns(traj):
     return int(((steps[1:] != steps[:-1]) & (steps[1:] != 0) & (steps[:-1] != 0)).sum())
 
 
-def check_rule(rule, traj, orders, picks, done, w):
+def check_rule(rule, traj, orders, picks, done, w, trips=(), who=None, ends=None):
+    """How many times a rule was broken. trips: list of (orders, {shelf: (start, end)}); who: order -> robot; ends: order -> cell delivered."""
     kind = rule["type"]
     if kind == "forbidden_cells":                       # {"cells": [...], "from": t0, "to": t1}
         part = traj[rule.get("from", 0):rule.get("to", len(traj))]
@@ -55,6 +57,19 @@ def check_rule(rule, traj, orders, picks, done, w):
         return int(bad)
     if kind == "deadline":                              # {"order": id, "t": step}
         return int(rule["order"] not in done or done[rule["order"]] > rule["t"])
+    if kind == "pick_before":                           # {"first": shelves, "then": shelves}: on every trip
+        first, then, bad = set(rule["first"]), set(rule["then"]), 0
+        for _, got in trips:
+            a = [got[s][1] for s in got if s in first and s not in then]
+            b = [got[s][0] for s in got if s in then and s not in first]
+            bad += bool(a and b and max(a) > min(b))
+        return bad
+    if kind == "no_mix":                                # {"a": order, "b": order}
+        return sum(rule["a"] in group and rule["b"] in group for group, _ in trips)
+    if kind == "robot_only":                            # {"order": id, "robots": [...]}
+        return int(rule["order"] in (who or {}) and who[rule["order"]] not in rule["robots"])
+    if kind == "station":                               # {"order": id, "cell": cell}
+        return int(rule["order"] not in (ends or {}) or ends[rule["order"]] != rule["cell"])
     raise ValueError(f"unknown rule {kind!r}")
 
 
@@ -126,15 +141,26 @@ def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds,
             wrong["overlap"] += len(active) >= capacity
             active.append(end)
     problems.update({f"wrong_{k}": v for k, v in wrong.items()})
-    rule_breaks = sum(check_rule(r, traj, orders, picks, done, w) for r in rules)
-    problems["rules_broken"] = rule_breaks
+    trips, who, ends = {}, {}, {}
+    for oid, ass in assigned.items():
+        group, got = trips.setdefault((ass["robot"], ass["t"]), (set(), {}))
+        group.add(oid)
+        who[oid] = ass["robot"]
+        for e in by_order.get(oid, ()):
+            if e["kind"] == "pick":
+                got[e["shelf"]] = (e["start"], e["end"])
+            else:
+                ends[oid] = e["cell"]
+    trips = list(trips.values())
+    by_rule = [check_rule(r, traj, orders, picks, done, w, trips, who, ends) for r in rules]
+    problems["rules_broken"] = sum(by_rule)
 
     ends = np.array([done[o["oid"]] for o in orders if o["oid"] in done], dtype=np.float64)
     delays = np.array([done[o["oid"]] - o["arrival"] for o in orders if o["oid"] in done], dtype=np.float64)
     T = len(traj) - 1
     secs = np.asarray(step_seconds, dtype=np.float64)
     q = np.percentile(secs, [50, 95]) if len(secs) else (0.0, 0.0)
-    return {"ok": not any(problems.values()), "problems": problems, "orders": len(orders), "delivered": len(done), "open": len(open_orders),
+    return {"ok": not any(problems.values()), "problems": problems, "by_rule": by_rule, "orders": len(orders), "delivered": len(done), "open": len(open_orders),
             "steps": T, "makespan": float(ends.max()) if len(ends) else float("nan"), "sum_completion": float(ends.sum()),
             "mean_delay": float(delays.mean()) if len(delays) else float("nan"),
             "orders_per_hour": len(done) / max(T, 1) * steps_per_hour, "step_ms_p50": 1e3 * float(q[0]),

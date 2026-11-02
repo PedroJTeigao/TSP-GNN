@@ -121,6 +121,7 @@ class PIBT:
         self.rng = random.Random(seed)
         self.fixed = None
         self.heading = None
+        self.shut = ()                                  # cells nobody may enter now (phase C)
 
     def field(self, i, cell):
         m = self.metric or self.wh
@@ -167,7 +168,7 @@ class PIBT:
 
         def pibt(i, j):
             h = maps[i]
-            options = wh.neighbours[pos[i]] + [pos[i]]
+            options = [v for v in wh.neighbours[pos[i]] if v not in self.shut] + [pos[i]]
             options = sorted(options, key=lambda v: (h[v], v in here and v != pos[i], self.bent(i, v), rng.random()))
             for v in options:
                 if v in taken or (j is not None and v == pos[j]):
@@ -210,6 +211,7 @@ class Prioritized:
         self.flow = {}
         self.pibt = PIBT(wh, seed)
         self.fallbacks = self.calls = 0
+        self.gates = None                               # t -> moves (u, v, k) forbidden k steps from now (phase C)
 
     def bound(self, cell):
         return self.metric.steps_to(cell) if self.metric is not None else self.wh.dist_to(cell)
@@ -254,7 +256,7 @@ class Prioritized:
         R = len(pos)
         ranked = sorted(range(R), key=lambda i: (-age[i], i))
         for _ in range(self.retries + 1):
-            vertex, edge, paths, failed = set(), set(), [None] * R, []
+            vertex, edge, paths, failed = set(), set(self.gates(t)) if self.gates else set(), [None] * R, []
             self.flow = {}
             for i in range(R):                          # the robots in service are fixed
                 vertex.update((pos[i], k) for k in range(hold[i] + 1) if hold[i] > 0)
