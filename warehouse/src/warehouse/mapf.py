@@ -111,14 +111,27 @@ def search_weighted(nb, start, t0, goal, h, vertex, edge, cost, horizon, stay=No
 
 
 class PIBT:
-    """Priority inheritance with backtracking: h is the distance to the goal on the empty grid."""
+    """Priority inheritance with backtracking: h is the distance to the goal on the empty grid, or in metric, which may have one
+    table per robot (of). heading: filled in by an Execution; between equal options a robot then keeps going straight."""
 
     execute = 1
 
-    def __init__(self, wh, seed=0, rule="age"):
-        self.wh, self.rule = wh, rule
+    def __init__(self, wh, seed=0, rule="age", metric=None):
+        self.wh, self.rule, self.metric = wh, rule, metric
         self.rng = random.Random(seed)
         self.fixed = None
+        self.heading = None
+
+    def field(self, i, cell):
+        m = self.metric or self.wh
+        return (m.of(i) if hasattr(m, "of") else m).dist_to(cell)
+
+    def bent(self, i, v):
+        """1 if the move of robot i to v needs a turn."""
+        if self.heading is None:
+            return 0
+        step = v - self._pos[i]
+        return 0 if step == 0 else int(step != (-self.wh.width, 1, self.wh.width, -1)[self.heading[i]])
 
     def bonus(self, pos, queue):
         """What rule adds to the age. The distance rules only break ties of age: as a real weight "far" livelocks, even at
@@ -149,12 +162,13 @@ class PIBT:
             if hold[i] > 0:
                 nxt[i] = pos[i]
                 taken[pos[i]] = i
-        maps = [wh.dist_to(q[0][0]) if q else wh.dist_to(p) for q, p in zip(queue, pos)]
+        maps = [self.field(i, q[0][0] if q else p) for i, (q, p) in enumerate(zip(queue, pos))]
+        self._pos = pos
 
         def pibt(i, j):
             h = maps[i]
             options = wh.neighbours[pos[i]] + [pos[i]]
-            options = sorted(options, key=lambda v: (h[v], v in here and v != pos[i], rng.random()))
+            options = sorted(options, key=lambda v: (h[v], v in here and v != pos[i], self.bent(i, v), rng.random()))
             for v in options:
                 if v in taken or (j is not None and v == pos[j]):
                     continue

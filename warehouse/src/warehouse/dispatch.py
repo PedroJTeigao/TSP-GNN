@@ -10,6 +10,7 @@ orders it gives out from pending.
     Batcher     up to two orders per trip: the oldest one and the order that overlaps it most (rule "overlap"), or the one
                 that adds the least walking (rule "near");
     Clusters    trips decided before the episode (batching.py), the first ones to the nearest free robot;
+    TripHungarian  the Hungarian over trips decided beforehand; the distance to the first shelf plus the length of the trip;
     Iterative   the nearest rule, then a robot changes order while that lowers its cost, or two robots swap;
     LiveBatches trips of up to cap orders by Clarke & Wright on the orders of the moment, in lifelong mode: at once, after a wait,
                 or knowing the arrivals of the next steps;
@@ -73,6 +74,59 @@ class Hungarian:
         out = [(free[i], (orders[j],)) for i, j in zip(rows, cols)]
         for _, (o,) in out:
             pending.remove(o)
+        return out
+
+
+class TripHungarian(Hungarian):
+    """A metric with of() gives one table per robot type: the cost of a trip depends on who takes it."""
+
+    def __init__(self, wh, clusters, metric=None, method="lkh", cache=None, reassign=True):
+        super().__init__(wh, metric=metric, method=method, cache=cache, reassign=reassign)
+        self.trips = [tuple(c) for c in clusters]
+        self.lengths = {}
+
+    def trip_profile(self, metric, group):
+        key = (id(metric), tuple(o.oid for o in group))
+        out = self.lengths.get(key)
+        if out is None:
+            cells = sorted({self.wh.access[s] for o in group for s in o.shelves})
+            ways = []
+            for way in S.delivery_orders(metric, group):
+                first, length = S.open_path(metric, cells, way[0].station, self.method, self.cache)
+                ways.append((length + sum(metric.dist_to(y.station)[x.station] for x, y in zip(way, way[1:])), first))
+            length, first = min(ways)
+            out = self.lengths[key] = (first, length)
+        return out
+
+    def to_cell(self, metric, cell):
+        key = (id(metric), cell)
+        m = self.maps.get(key)
+        if m is None:
+            m = self.maps[key] = np.asarray(metric.dist_to(cell))
+        return m
+
+    def costs(self, free, trips, pos):
+        at = np.asarray([pos[r] for r in free])
+        out = np.empty((len(free), len(trips)), dtype=np.int64)
+        typed = hasattr(self.metric, "of")
+        tables = [self.metric.of(r) if typed else self.metric for r in free]
+        for metric in {id(m): m for m in tables}.values():
+            rows = np.flatnonzero([m is metric for m in tables])
+            for j, group in enumerate(trips):
+                first, length = self.trip_profile(metric, group)
+                out[rows, j] = self.to_cell(metric, first)[at[rows]] + length
+        return out
+
+    def choose(self, t, free, pending, pos):
+        here = {o.oid for o in pending}
+        trips = [g for g in self.trips if all(o.oid in here for o in g)]
+        if not free or not trips:
+            return []
+        rows, cols = linear_sum_assignment(self.costs(free, trips, pos))
+        out = [(free[i], trips[j]) for i, j in zip(rows, cols)]
+        for _, group in out:
+            for o in group:
+                pending.remove(o)
         return out
 
 

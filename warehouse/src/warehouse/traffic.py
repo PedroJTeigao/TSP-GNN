@@ -104,12 +104,15 @@ class EdgeStats:
             e[1] += lost
             e[2] = self.decay * e[2] + (1 - self.decay) * lost
 
-    def observe(self, now, nxt, goals):
-        """One step: cells before and after, and the target of each robot (negative: in service or at rest)."""
+    def observe(self, now, nxt, goals, skip=None):
+        """One step: cells before and after, and the target of each robot (negative: in service or at rest). skip[i]: this step of
+        robot i is not charged to the edge."""
         for i, c in enumerate(goals):
             p, q = now[i], nxt[i]
             if c < 0 or p == c:
                 self.owed[i] = 0
+                continue
+            if skip is not None and skip[i]:
                 continue
             d = self.wh.dist_to(c)
             if d[q] < d[p]:
@@ -136,10 +139,11 @@ class EdgeStats:
                 "cell_lost": c[:, 1], "cell_decayed": c[:, 2]}
 
 
-def edge_stats(wh, traj, targets, decay=0.9):
+def edge_stats(wh, traj, targets, decay=0.9, skip=None):
+    """skip: (T, R) truth values, the steps left out."""
     s = EdgeStats(wh, decay)
     for t in range(len(targets)):
-        s.observe(traj[t].tolist(), traj[t + 1].tolist(), targets[t].tolist())
+        s.observe(traj[t].tolist(), traj[t + 1].tolist(), targets[t].tolist(), None if skip is None else skip[t].tolist())
     return s
 
 

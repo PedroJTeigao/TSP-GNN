@@ -22,17 +22,21 @@ SERVICE = 3                                     # steps at a shelf and at a stat
 
 
 def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_steps=30000, stop_at=None, robots=None,
-                planner_args=None, dispatcher=None, metric=None, cache=None):
+                planner_args=None, dispatcher=None, metric=None, cache=None, execution=None):
     """Runs until every order is delivered, or until stop_at (lifelong mode), or max_steps. Returns the episode: traj (T+1,
     R) cells; targets (T, R) the cell each robot is heading to, -1 at rest, -2 in service; events; step_seconds; stats.
     dispatcher: who takes which orders (default: dispatch.Nearest). metric: the distances of layer 1, with dist_to like the
-    Warehouse (default: the empty grid); planners always use the empty grid. cache: visit orders kept across episodes."""
+    Warehouse (default: the empty grid), one per robot if it has of; planners use the empty grid unless planner_args says otherwise.
+    cache: visit orders kept across episodes. planner: a name, or a planner. execution: an exec.Execution between the plan and the
+    cells (default: the plan happens exactly)."""
     R = robots or wh.layout.robots
     metric = metric or wh
     dispatcher = dispatcher or D.Nearest(wh, metric)
     pos = W.start_cells(wh, R, seed)
     home = list(pos)
-    plan = M.make_planner(planner, wh, seed=seed, **(planner_args or {}))
+    plan = planner if hasattr(planner, "plan") else M.make_planner(planner, wh, seed=seed, **(planner_args or {}))
+    if execution is not None:
+        execution.bind(plan)
     pending = deque()
     future = deque(sorted(orders, key=lambda o: (o.arrival, o.oid)))
     queue = [[] for _ in range(R)]                  # next stops: (cell, dwell, kind, order id, shelf)
@@ -61,7 +65,7 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
 
     def give(r, group, t):
         nonlocal seq_seconds
-        stops, deliveries, sec = S.route(metric, wh, pos[r], group, method, cache)
+        stops, deliveries, sec = S.route(metric.of(r) if hasattr(metric, "of") else metric, wh, pos[r], group, method, cache)
         seq_seconds += sec
         busy[r], carried[r], started[r] = len(group), group, False
         queue[r] = [(wh.access[s], service, "pick", owner, s) for s, owner in stops]
@@ -102,12 +106,15 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
         if stop_at is not None and t >= stop_at:
             break
         tick = time.perf_counter()
-        if not buffered:                            # orders are given out only between plans, which they would change
+        if execution.idle() if execution else not buffered:     # orders are given out only between plans, which they would change
             assign(t)
             state = [[(c, d) for c, d, *_ in q] for q in queue]
-            paths = plan.plan(t, pos, hold, state, age)
-            buffered.extend(zip(*paths))
-        nxt = list(buffered.popleft())
+            paths = plan.plan(t, pos, execution.view(hold) if execution else hold, state, age)
+            if execution:
+                execution.load(pos, paths)
+            else:
+                buffered.extend(zip(*paths))
+        nxt = execution.step(pos, hold) if execution else list(buffered.popleft())
         secs.append(time.perf_counter() - tick)
         targets.append([-2 if hold[i] > 0 else (queue[i][0][0] if queue[i] else -1) for i in range(R)])
         observe(t, pos, nxt, targets[-1])
@@ -138,4 +145,5 @@ def run_episode(wh, cat, orders, method, planner, seed, service=SERVICE, max_ste
             "events": events, "step_seconds": np.array(secs), "seq": seq_rows, "seq_seconds": seq_seconds,
             "delivered": delivered, "pending_end": len(pending) + len(future),
             "planner": {k: getattr(plan, k, 0) for k in ("calls", "fallbacks", "timeouts", "expanded", "spent")},
-            "service": service, "seconds": float(np.sum(secs))}
+            "service": service, "seconds": float(np.sum(secs)), "log": np.array(execution.log, dtype=np.int8).reshape(-1, R) if execution else None,
+            "exec": execution.stats() if execution else None}

@@ -7,7 +7,8 @@ import the simulator, the planners or the Warehouse class. Checks:
     every product of every delivered order was picked by the robot of that order, standing next to its shelf for the whole
     service time, after the arrival of the order and before the delivery, and the delivery happened at the right station;
     a robot does not carry two orders at once;
-    the extra rules (phase C): forbidden cells, an order of products inside an order, deadlines.
+    the extra rules (phase C): forbidden cells, an order of products inside an order, deadlines;
+    with rotation: a robot never changes direction between two moves without a step in place for the turn.
 """
 
 import numpy as np
@@ -35,6 +36,12 @@ def bad_moves(traj, grid):
     return int((steps > 1).sum()), int((grid[r, c] == SHELF).sum())
 
 
+def sharp_turns(traj):
+    """Moves in a new direction that come right after the previous move, with no step in place to turn."""
+    steps = np.diff(traj, axis=0)
+    return int(((steps[1:] != steps[:-1]) & (steps[1:] != 0) & (steps[:-1] != 0)).sum())
+
+
 def check_rule(rule, traj, orders, picks, done, w):
     kind = rule["type"]
     if kind == "forbidden_cells":                       # {"cells": [...], "from": t0, "to": t1}
@@ -51,15 +58,16 @@ def check_rule(rule, traj, orders, picks, done, w):
     raise ValueError(f"unknown rule {kind!r}")
 
 
-def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600, cut=False, capacity=1):
+def verify(traj, grid, orders, shelf_of, shelves, events, service, step_seconds, rules=(), steps_per_hour=3600, cut=False, capacity=1, rotation=False):
     """orders: dicts with oid, products, station, arrival. shelf_of[p]: shelf index of a product; shelves[k]: its (row, col).
     cut: a horizon stopped the episode, so a started order may lack its delivery; its picks are still judged and it counts as open.
-    capacity: orders a robot may carry at once. Returns {"ok", "problems": {name: count}, metrics}."""
+    capacity: orders a robot may carry at once. rotation: robots need a step to turn. Returns {"ok", "problems": {name: count}, metrics}."""
     traj = np.asarray(traj)
     w = grid.shape[1]
     problems = {}
     problems["vertex_conflicts"], problems["edge_conflicts"] = collisions(traj)
     problems["long_moves"], problems["on_shelf"] = bad_moves(traj, grid)
+    problems["sharp_turns"] = sharp_turns(traj) if rotation else 0
 
     assigned = {e["order"]: e for e in events if e["kind"] == "assign"}
     by_order = {}

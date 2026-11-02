@@ -118,8 +118,8 @@ SOLVERS = {"nn": nearest, "2opt": two_opt, "lkh": lkh, "exact": exact}
 
 def sequence(wh, start, stops, station, method, cache=None):
     """(stops in visit order, seconds). stops: cells; repeated cells are kept (two shelves can share an access cell).
-    The cache is keyed by the problem, so a repeated problem costs nothing."""
-    key = (start, tuple(stops), station, method)
+    The cache is keyed by the problem and the metric, so a repeated problem costs nothing."""
+    key = (id(wh), start, tuple(stops), station, method)
     if cache is not None and key in cache:
         return cache[key], 0.0
     t0 = time.perf_counter()
@@ -134,7 +134,7 @@ def sequence(wh, start, stops, station, method, cache=None):
 
 def open_path(metric, stops, station, method="lkh", cache=None):
     """The order on its own, from no particular start: (first cell, length to the station). Node 0 is a free start."""
-    key = ("open", tuple(stops), station, method)
+    key = ("open", id(metric), tuple(stops), station, method)
     if cache is not None and key in cache:
         return cache[key]
     pts = list(stops) + [station]
