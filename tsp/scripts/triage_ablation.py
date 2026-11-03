@@ -36,13 +36,14 @@ from tsp_gnn.data import load_dataset, tour_length
 from tsp_gnn.decode import optimality_gap, verify_tour
 from tsp_gnn.fast_triage import GlobalScorer, WindowBatchScorer
 from tsp_gnn.learned_triage import LearnedScore
-from tsp_gnn.triage import RANKED_SCORES, ranked_refine
+from tsp_gnn.triage import MEMO_MODES, RANKED_SCORES, ranked_refine
 from tsp_gnn.utils import git_info
 from tsp_gnn.window import initial_tour
 
 from triage_log import load_heatmaps
 
-FIELDS = ("ms_score", "ms_net", "ms_lkh", "windows", "to_lkh", "improved", "passes")
+FIELDS = ("ms_score", "ms_net", "ms_lkh", "windows", "to_lkh", "improved", "passes", "lkh_calls", "memo_hits",
+          "ms_lkh_repeat")
 BATCHED = ("fast_disagreement", "fast_learned", "global_disagreement", "global_learned")
 NETWORK = ("disagreement", "learned") + BATCHED                      # scores that need a TAGCN seed
 
@@ -61,13 +62,18 @@ def main():
     parser.add_argument("--model", default=None, help="learned: chosen.joblib of scripts/learned_triage_train.py")
     parser.add_argument("--torch-threads", type=int, default=2, help="torch CPU threads (2 in every earlier run)")
     parser.add_argument("--folder-suffix", default="", help="appended to the output folder (diagnostic runs)")
+    parser.add_argument("--memo", choices=MEMO_MODES, default="none",
+                        help="ablation A1: window memo (triage.ranked_refine); not 'none' adds _memo<mode> to the folder")
+    parser.add_argument("--rep", type=int, default=None, help="ablation A2: repetition number, adds _rep<r> to the folder")
     args = parser.parse_args()
+    load_before = os.getloadavg()
     if args.score in NETWORK and (args.seeds is None or len(args.seeds) != 1):
         parser.error(f"{args.score} needs exactly one --seeds (the TAGCN K=3 seed)")
     if args.score.endswith("learned") and args.model is None:
         parser.error("learned needs --model")
     seeds = args.seeds if args.seeds is not None else ([0, 1, 2, 3, 4] if args.score == "random" else [None])
     folder = (f"{args.score}_seed{seeds[0]}" if args.score in NETWORK else args.score) + args.folder_suffix
+    folder += (f"_memo{args.memo}" if args.memo != "none" else "") + (f"_rep{args.rep}" if args.rep is not None else "")
     out_dir = os.path.join(args.out_root, folder)
     name = os.path.splitext(os.path.basename(args.data))[0]
     if os.path.exists(os.path.join(out_dir, f"{name}.json")):
@@ -108,7 +114,7 @@ def main():
             rng = np.random.default_rng([s, i]) if args.score == "random" else None
             start = time.perf_counter()
             tour, stats = ranked_refine(coords, t0, args.width, run_score, x / 100, heatmaps, rng, args.max_passes,
-                                        learned, scorer)
+                                        learned, scorer, memo=args.memo)
             add(f"{p}__ms", 1000 * (time.perf_counter() - start))
             verify_tour(tour, n)
             g = optimality_gap(tour_length(coords, tour), opt)
@@ -124,13 +130,18 @@ def main():
     summary = {"meta": {"git_commit": commit, "git_dirty": dirty, "date": datetime.date.today().isoformat(),
                         "score": args.score, "seeds": seeds, "model": args.model, "epoch": epoch, "dataset": name, "data": args.data,
                         "n": n, "num": num, "two_opt_k": k, "width": args.width, "max_passes": args.max_passes,
-                        "fracs": args.fracs},
+                        "fracs": args.fracs, "memo": args.memo, "rep": args.rep,
+                        "device": str(heatmaps.device) if heatmaps is not None else "none",
+                        "load_before": load_before, "load_after": os.getloadavg()},
                "initial": {"gap_mean": float(per_inst["initial__gap"].mean())}}
     for p in policies:
         summary[p] = {"gap_mean": float(per_inst[f"{p}__gap"].mean()),
                       "gain_mean": float(per_inst[f"{p}__gain"].mean()),
                       "lkh_frac": float(per_inst[f"{p}__to_lkh"].sum() / per_inst[f"{p}__windows"].sum()),
-                      "ms_mean": float(per_inst[f"{p}__ms"].mean())}
+                      "ms_mean": float(per_inst[f"{p}__ms"].mean()),
+                      "lkh_calls_mean": float(per_inst[f"{p}__lkh_calls"].mean()),
+                      "memo_hits_mean": float(per_inst[f"{p}__memo_hits"].mean()),
+                      "ms_lkh_repeat_mean": float(per_inst[f"{p}__ms_lkh_repeat"].mean())}
         s = summary[p]
         print(f"  {p:<22} gap {s['gap_mean']:6.2f}%  gain {s['gain_mean']:5.2f} pp  "
               f"to LKH {100 * s['lkh_frac']:5.1f}%  {s['ms_mean']:9.1f} ms", flush=True)

@@ -101,7 +101,10 @@ def main():
     parser.add_argument("--procs", type=int, default=8)
     parser.add_argument("--max-instances", type=int, default=None)
     parser.add_argument("--out-root", default="results/phase3_benchmark/e1")
+    parser.add_argument("--starts", nargs="+", choices=("lkh", "ours"), default=["lkh", "ours"],
+                        help="starts to run (ablation A2 runs only lkh, the anchor of the report)")
     args = parser.parse_args()
+    load_before = os.getloadavg()
     name = os.path.splitext(os.path.basename(args.data))[0]
     out_npz, out_json = (os.path.join(args.out_root, f"{name}.{ext}") for ext in ("npz", "json"))
     if os.path.exists(out_json):
@@ -116,7 +119,8 @@ def main():
     costs = fixed_costs(args.prep)
     all_variants = variants(n)
     names = [v for v in all_variants if (v, False) in costs and (args.variants is None or v in args.variants)]
-    configs = [(v, ours, b) for v in names for ours in (False, True) for b in args.budgets]
+    starts = [ours for ours in (False, True) if ("ours" if ours else "lkh") in args.starts]
+    configs = [(v, ours, b) for v in names for ours in starts for b in args.budgets]
     fits = [costs[(v, ours)][2] <= b for v, ours, b in configs]
     print(f"{name}: n = {n}, {num} instances, {len(configs)} configs, {sum(fits)} fit their budget", flush=True)
     for (v, ours, b), ok in zip(configs, fits):
@@ -180,7 +184,8 @@ def main():
                         config_budget=np.array([b for _, _, b in configs]), config_fits=np.array(fits))
     meta = {"git_commit": commit, "git_dirty": dirty, "data": args.data, "n": n, "num": num, "k": k,
             "budgets": args.budgets, "variants": {v: all_variants[v] for v in names}, "prep": args.prep,
-            "heat_run": HEAT_RUN, "lkh_version": "LKH-3.0.6 (cerebis/LKH3 mirror)",
+            "heat_run": HEAT_RUN, "procs": args.procs, "load_before": load_before, "load_after": os.getloadavg(),
+            "lkh_version": "LKH-3.0.6 (cerebis/LKH3 mirror)",
             "note": "TIME_LIMIT per run, checked between trials; compare total_seconds with the budget"}
     with open(out_json, "w") as f:
         json.dump(meta, f, indent=2)

@@ -218,9 +218,29 @@ def top_fraction(scores, frac):
     return mask
 
 
-def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3, learned=None, scorer=None):
+MEMO_MODES = ("none", "cache", "exclude")
+
+
+def window_key(cities):
+    """Memo key of a window: its cities in current order (the ends included). LKH on the window is deterministic, so
+    the same key always gives the same path (checked in tests/test_window_memo.py)."""
+    return np.asarray(cities, dtype=np.int64).tobytes()
+
+
+def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_passes=3, learned=None, scorer=None,
+                  memo="none"):
     """Window refinement where, in each half-pass, the top `frac` of the windows by `score` go to LKH and the
     others are left as they are. All policies thus send the same number of windows to LKH.
+
+    memo (ablation A1, 2026-11-03; one memo per call, i.e. per instance):
+        "none"     no memo, as in phase 3. A shadow memo still records which LKH calls repeat a window already solved
+                   (same cities in the same order) and their time: memo_hits and ms_lkh_repeat, so the time with
+                   "cache" can also be read off this run as ms − ms_lkh_repeat.
+        "cache"    (a) a selected window already solved is not sent to LKH again: its stored path is reused. Same
+                   selection, same paths, so the same tour as "none"; only the LKH calls and the time change.
+        "exclude"  (b) as "cache", and windows already solved (hence unchanged since) cannot be selected: the top
+                   `frac` is taken among the others, so the share of windows goes to windows LKH has not seen.
+                   With fewer such windows than the share, all of them go.
 
     score: "random" (uniform, from rng), "simple" (simple_rule), "disagreement" (segment_disagreement of the
     network's heatmap) or "oracle" (the real LKH gain of the window, current − LKH path length, as recorded
@@ -230,11 +250,14 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
     prepare() is counted in ms_score, its network time also in ms_net).
     Returns (new tour, stats) as triage_refine, plus ms_score (time to compute the scores, network included).
     """
-    assert score in RANKED_SCORES
+    assert score in RANKED_SCORES and memo in MEMO_MODES
+    assert not (score == "oracle" and memo != "none"), "the oracle runs LKH on every window to rank them"
     t = np.array(tour, dtype=np.int64)
     n = len(t)
     stats = {"windows": 0, "to_model": 0, "to_lkh": 0, "improved": 0, "passes": 0, "gain": 0.0,
-             "ms_net": 0.0, "ms_beam": 0.0, "ms_lkh": 0.0, "ms_score": 0.0}
+             "ms_net": 0.0, "ms_beam": 0.0, "ms_lkh": 0.0, "ms_score": 0.0,
+             "lkh_calls": 0, "memo_hits": 0, "ms_lkh_repeat": 0.0}
+    solved = {}          # window key -> LKH path (local order); in mode "none" only the shadow record
     nn_dist = None
     if score == "simple":
         start = time.perf_counter()
@@ -282,16 +305,36 @@ def ranked_refine(coords, tour, w, score, frac, heatmaps=None, rng=None, max_pas
                 stats["ms_lkh"] += elapsed
             else:
                 stats["ms_score"] += elapsed
-            chosen = top_fraction(values, frac)
-            for i, pts, order, go in zip(idx, sets, orders, chosen):
+            keys = [window_key(t[i]) for i in idx]
+            if memo == "exclude":
+                seen = np.array([k in solved for k in keys])
+                k_go = max(1, int(round(frac * len(values))))
+                masked = np.where(seen, -np.inf, np.asarray(values, dtype=float))
+                order_ = np.argsort(-masked, kind="stable")[:k_go]
+                chosen = np.zeros(len(values), dtype=bool)
+                chosen[order_] = True
+                chosen &= ~seen
+            else:
+                chosen = top_fraction(values, frac)
+            for i, pts, order, go, key in zip(idx, sets, orders, chosen, keys):
                 stats["windows"] += 1
                 if not go:
                     continue
                 stats["to_lkh"] += 1
                 if order is None:
-                    start = time.perf_counter()
-                    order = lkh_path(pts)
-                    stats["ms_lkh"] += 1000 * (time.perf_counter() - start)
+                    if memo != "none" and key in solved:
+                        stats["memo_hits"] += 1
+                        order = solved[key]
+                    else:
+                        start = time.perf_counter()
+                        order = lkh_path(pts)
+                        ms = 1000 * (time.perf_counter() - start)
+                        stats["ms_lkh"] += ms
+                        stats["lkh_calls"] += 1
+                        if key in solved:                 # shadow record (mode "none")
+                            stats["memo_hits"] += 1
+                            stats["ms_lkh_repeat"] += ms
+                        solved[key] = order
                 old, new = path_length(pts), path_length(pts[order])
                 if new < old - IMPROVE_TOL:
                     t[i] = t[i][order]
