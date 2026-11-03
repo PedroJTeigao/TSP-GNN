@@ -248,11 +248,12 @@ def main_c(args):
         for e in TRANS.get(r["idx"], []):
             if args.arms is None or e["arm"] in args.arms:
                 key = accepted(e, ctx)[3]
-                if key not in seen and not os.path.exists(f"{OUT}/c/{r['idx']}_{key}.json"):
-                    seen.add(key)
+                if (r["idx"], key) not in seen and not os.path.exists(f"{OUT}/c/{r['idx']}_{key}.json"):
+                    seen.add((r["idx"], key))
                     jobs.append((r["idx"], r["seed"], e["level"], e["arm"], key))
         key = accepted(arms[0][1], ctx)[3]
-        if not os.path.exists(f"{OUT}/c/{r['idx']}_{key}.json"):
+        if (r["idx"], key) not in seen and not os.path.exists(f"{OUT}/c/{r['idx']}_{key}.json"):
+            seen.add((r["idx"], key))
             TRANS.setdefault(r["idx"], []).append({"level": "L1", "arm": "oracle", **arms[0][1]})
             jobs.append((r["idx"], r["seed"], "L1", "oracle", key))
     print(f"{len(jobs)} episodes to run ({time.perf_counter() - start:.0f} s to list them)", flush=True)

@@ -82,6 +82,13 @@ def episode(idx, key):
     return json.load(open(path)) if os.path.exists(path) else None
 
 
+def unclean(rows):
+    """Every request but the audited L2 texts found right: what is left is a small sample without label errors."""
+    path = f"{OUT}/l2_audit.json"
+    good = {e["idx"] for e in json.load(open(path))["items"] if e["ok"]}
+    return {r["idx"] for r in rows} - good
+
+
 def excluded():
     path = f"{OUT}/l2_audit.json"
     return {e["idx"] for e in json.load(open(path))["items"] if not e["ok"]} if os.path.exists(path) else set()
@@ -155,28 +162,65 @@ def pct(a, b):
     return 100 * (a - b) / b
 
 
+def translate_alone(level, arm, s):
+    """Seconds of translation for an arm, with the LLM latency measured alone: its median, once per request sent to the LLM."""
+    data = Q.jl(f"{OUT}/latency_alone.jsonl")
+    sec = lambda a: median(e["seconds"] for e in data if e["arm"] == a and e["level"] == level)
+    if arm in Q.MODELS:
+        return sec(arm)
+    return np.mean([bool(r["sent"]) for r in s]) * sec("q14") if arm == "h1" else 0.0
+
+
+def table_valid(rows, skip=frozenset()):
+    """Paired test on the episodes: one arm valid (0 true rules broken) and the other not."""
+    lines = ["| level | arms | first valid, second not | first not, second valid | exact McNemar p |", "|---|---|---:|---:|---:|"]
+    for lv in Q.LEVELS:
+        for a, b in (("q14", "p1"), ("h1", "q14"), ("h1", "p1")):
+            ra, rb = {r["idx"]: r for r in pick(rows, lv, a, skip)}, {r["idx"]: r for r in pick(rows, lv, b, skip)}
+            x = sum(ra[i]["ep"]["broken"] == 0 and rb[i]["ep"]["broken"] > 0 for i in ra)
+            y = sum(ra[i]["ep"]["broken"] > 0 and rb[i]["ep"]["broken"] == 0 for i in ra)
+            lines.append(f"| {lv} | {a} vs {b} | {x} | {y} | {binomtest(x, x + y, 0.5).pvalue if x + y else 1.0:.3g} |")
+    return "\n".join(lines)
+
+
+def table_outliers(rows):
+    """The median request costs nothing; the mean is moved by a few large cases."""
+    lines = ["| level | arm | makespan vs oracle %, median | requests above +20 % | requests below -5 % | largest % |", "|---|---|---:|---:|---:|---:|"]
+    for lv in Q.LEVELS:
+        for arm in ARMS[1:]:
+            p = [pct(r["ep"]["makespan"], r["oracle"]["makespan"]) for r in pick(rows, lv, arm)]
+            lines.append(f"| {lv} | {arm} | {median(p):+.1f} | {sum(x > 20 for x in p)} | {sum(x < -5 for x in p)} | {max(p):+.1f} |")
+    return "\n".join(lines)
+
+
+def table_own(rows):
+    """Episodes that broke a rule of their own arm, rules the planner was given."""
+    bad = [r for r in rows if not r["ep"]["ok"]]
+    return f"{len(bad)} of {len(rows)} arm episodes broke a rule the arm itself had given the solvers; {sum(not r['oracle']['ok'] for r in rows if r['arm'] == 'p1' and r['level'] == 'L1')} of 200 oracle episodes did."
+
+
 def table_c(rows, skip=frozenset()):
-    lines = ["| level | arm | episodes | 0 violations of the true rules [Wilson 95 %] | requests with a rule rejected (rules) | makespan | vs oracle % | mean delay | vs oracle % | true rules broken per episode | LLM + parser s | ms/step planner |",
-             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    lines = ["| level | arm | episodes | 0 violations of the true rules [Wilson 95 %] | requests with a rule rejected (rules) | makespan | vs oracle % | mean delay | vs oracle % | true rules broken per episode | LLM + parser s, main run | total s, LLM alone | ms/step planner |",
+             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for lv in Q.LEVELS:
         base = [r for r in pick(rows, lv, "p1", skip) if r["oracle"]]
         if base:
             o = [r["oracle"] for r in base]
             ok = sum(x["broken"] == 0 for x in o)
-            lines.append(f"| {lv} | oracle | {len(o)} | {pc(ok, len(o))} | 0 | {np.mean([x['makespan'] for x in o]):.0f} | - | {np.mean([x['mean_delay'] for x in o]):.0f} | - | {np.mean([x['broken'] for x in o]):.2f} | 0 | {np.mean([x['step_ms'] for x in o]):.1f} |")
+            lines.append(f"| {lv} | oracle | {len(o)} | {pc(ok, len(o))} | 0 | {np.mean([x['makespan'] for x in o]):.0f} | - | {np.mean([x['mean_delay'] for x in o]):.0f} | - | {np.mean([x['broken'] for x in o]):.2f} | 0 | {np.mean([x['elapsed'] for x in o]):.1f} | {np.mean([x['step_ms'] for x in o]):.1f} |")
         for arm in ARMS[1:]:
             s = [r for r in pick(rows, lv, arm, skip) if r["ep"] and r["oracle"]]
             if s:
                 ok = sum(r["ep"]["broken"] == 0 for r in s)
                 rej = sum(r["rejected"] > 0 for r in s)
                 lines.append(f"| {lv} | {arm} | {len(s)} | {pc(ok, len(s))} | {rej} ({sum(r['rejected'] for r in s)}) | {np.mean([r['ep']['makespan'] for r in s]):.0f} | {mean_ci([pct(r['ep']['makespan'], r['oracle']['makespan']) for r in s])} |"
-                             f" {np.mean([r['ep']['mean_delay'] for r in s]):.0f} | {mean_ci([pct(r['ep']['mean_delay'], r['oracle']['mean_delay']) for r in s])} | {np.mean([r['ep']['broken'] for r in s]):.2f} | {np.mean([r['seconds'] for r in s]):.2f} | {np.mean([r['ep']['step_ms'] for r in s]):.1f} |")
+                             f" {np.mean([r['ep']['mean_delay'] for r in s]):.0f} | {mean_ci([pct(r['ep']['mean_delay'], r['oracle']['mean_delay']) for r in s])} | {np.mean([r['ep']['broken'] for r in s]):.2f} | {np.mean([r['seconds'] for r in s]):.2f} | {translate_alone(lv, arm, s) + np.mean([r['ep']['elapsed'] for r in s]):.1f} | {np.mean([r['ep']['step_ms'] for r in s]):.1f} |")
     return "\n".join(lines)
 
 
 def table_wrong(rows):
     """What a wrong translation costs: the episodes of requests not translated exactly, split by whether they broke a true rule."""
-    lines = ["| level | arm | not exact | of them invalid | makespan vs oracle %, invalid | delay vs oracle %, invalid | makespan vs oracle %, valid | delay vs oracle %, valid | true rules broken per invalid episode | orders hit by a broken rule, mean |",
+    lines = ["| level | arm | not exact | of them invalid | makespan vs oracle %, invalid | delay vs oracle %, invalid | makespan vs oracle %, valid | delay vs oracle %, valid | true rule violations per invalid episode | atomic checks broken per invalid episode |",
              "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for lv in Q.LEVELS:
         for arm in ARMS[1:]:
@@ -297,15 +341,18 @@ def section(notes, name):
 def main():
     rows = load()
     skip = excluded()
+    clean = unclean(rows)
     notes = open("docs/phaseC_notes.md").read()
     head = "# Warehouse, phase C: the LLM as a language interface\n"
     parts = [head, section(notes, "Conclusion"), "## Design\n", section(notes, "Design"), "## Data\n", dataset(),
              "## Table B: translation\n", table_b(rows), "\nWithout the L2 texts the audit found wrong:\n", table_b(rows, skip),
              "\nq14 against p1:\n", mcnemar(rows, "q14", "p1"), "\nh1 against q14:\n", mcnemar(rows, "h1", "q14"), "\nh1 against p1:\n", mcnemar(rows, "h1", "p1"),
              "\nThe same tests without the L2 texts the audit found wrong, q14 against p1:\n", mcnemar(rows, "q14", "p1", skip), "\nh1 against q14:\n", mcnemar(rows, "h1", "q14", skip),
+             "\nOn the 39 audited L2 texts found right, the only L2 sample known to be free of label errors (the L1 rows are unchanged):\n", table_b(rows, clean),
              "\n### Types of error\n", table_errors(rows), "\n### Rules exact by type\n", table_types(rows), "\n### The trigger of the hybrid\n", table_hybrid(rows),
-             "## Table C: episodes\n", section(notes, "Reading table C"), "\n", table_c(rows), "\nWithout the L2 texts the audit found wrong:\n", table_c(rows, skip),
-             "\n### What a wrong translation costs\n", table_wrong(rows), "\n### What the validator rejected\n", table_rejects(rows),
+             "## Table C: episodes\n", section(notes, "Reading table C"), "\n", table_c(rows), "\nWithout the L2 texts the audit found wrong:\n", table_c(rows, skip), "\nOn the 39 audited L2 texts found right:\n", table_c(rows, clean),
+             "\nPaired, valid episodes:\n", table_valid(rows), "\nThe same without the L2 texts the audit found wrong:\n", table_valid(rows, skip), "\n", table_own(rows),
+             "\n### What a wrong translation costs\n", table_wrong(rows), "\n", table_outliers(rows), "\n### What the validator rejected\n", table_rejects(rows),
              "## Latency\n", section(notes, "Latency"), "\nMeasured alone, 30 calls per arm:\n", table_latency(rows), "\nIn the main run, for reference:\n", table_run_latency(rows),
              "## GPU\n", table_pauses(), "\n", section(notes, "GPU"), "## Audit of L2\n", section(notes, "Audit"), "\n", audit(), "## Budget\n", budget(), "\n", section(notes, "Budget"), "## Caveats\n", section(notes, "Caveats")]
     open("docs/phaseC_language.md", "w").write("\n".join(parts) + "\n")
