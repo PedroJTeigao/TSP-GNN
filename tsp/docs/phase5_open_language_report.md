@@ -6,6 +6,12 @@ Generated 2026-11-01 by scripts/phase5_open_language_report.py. Data in results/
 
 A larger local LLM beats a fair parser only in part of open language: on the L2 paragraphs qwen3:14b gets 70.9 % of the rules against 54.7 % for p1 at n = 200 (McNemar p = 0.0003), ties at n = 1000 (59.6 % against 60.3 %, p = 1), and loses to p1 on L0 and on the template sentences of L1 (75–80 % against 100 %). Its time cost is 10 s per call on a cool GPU and 25–30 s on the throttled T4, against about 0 s for the parser, and thinking on takes about 16 times longer in the run (438 s against 27 s per L2 text) with no gain on L2 in a small sample. Route validity follows the same split: on L2, q14 gives 80 % valid routes against 63 % for p1 at n = 200 (p = 0.053) and 60 % against 57 % at n = 1000 (p = 1), and with an audited label error of 28 % in L2 (CI 18.5–40.8 %) neither arm is safe to use without checking routes in code.
 
+*Note 2026-11-04 (ablation A3, `../../docs/ablations_2026-11-03.md`): with no translation at all (the pure route, no
+rule), 17–30 % of the part C routes are already valid against the label, so these validity rates are not measured from
+zero: on L2, q14's 80 % is +52 pp over not translating at n = 200 (p1: +35 pp), and 60 % is +43 pp at n = 1000 (p1:
++40 pp). At n = 1000 on L2, q7 (33 % against 17 %, p = 0.06) and g12 (30 % against 20 %, p = 0.69) cannot be told
+apart from not translating. The comparisons between arms are paired on the same routes and do not change.*
+
 ## Goal
 
 Test the hypothesis of the earlier steps fairly: an LLM only has a place in really open language, and it needs a larger model. Before this step the parser got 99 % and qwen2.5:7b 58–81 %, on paraphrases filtered by the parser itself, which favoured the parser. Here L2 is not filtered by any tested parser or model.

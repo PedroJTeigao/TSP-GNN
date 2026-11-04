@@ -60,6 +60,10 @@ is not selected, so the x % goes to new windows. The cache never changes the gap
 except seed 2 without memo (−0.02, n.s.); on Fu-1k, seeds 1 and 2 without memo, it ties random (n.s.). At 50 % with
 exclude every policy ends within 0.015 pp of LKH on every window. Full table in `tsp/results/ablations/a12.md`.
 
+**The original window.refine** (LKH, w = 20, ≤ 5 passes; Fu-10k, 16 instances, one run, measured 2026-11-04,
+`tsp/scripts/ablation_a1_window_refine.py`): 58 % of the window calls repeat a window already solved; with a cache every
+tour is identical (3.845 %, 3 passes) and the refinement takes 8.4 s instead of 19.3 s (−57 %).
+
 **Reading.**
 - Half of the LKH time of "LKH on every window" was spent re-solving windows already solved. With the cache it takes
   10.9–11.4 s on Fu-10k (not 23 s), and it then reaches 3.845 % faster than any triage at 50 % without memo

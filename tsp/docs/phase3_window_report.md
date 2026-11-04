@@ -176,8 +176,10 @@ One CPU process per solver/seed (5 in parallel), network on the GPU in batches.
 built from distances alone (SoftDist, one parameter τ = 0.75, no learning) beats the TSP-20 model in the same windows
 by 0.10–0.24 pp on the Fu et al. sets (beam B = 10, w = 20: 4.14 against 4.34 % at 1k and 4.03 against 4.19 % at 10k,
 16/16 instances at 10k), so the gain over greedy edge + 2-opt does not show that the network learned anything useful
-for paths. In (3), about half of the LKH window calls re-solve a window already solved (A1, ranked triage at 100 %): with
-a cache, LKH windows cost about half the time quoted here, so they are cheaper per pp than beam paths.*
+for paths. In (3), measured 2026-11-04 with this refine (LKH, w = 20, ≤ 5 passes; Fu-10k, 16 instances, one run, CPU,
+`tsp/scripts/ablation_a1_window_refine.py`): 58 % of the LKH window calls re-solve a window already solved. A cache
+leaves every tour identical (3.845 %, 3 passes) and cuts the refinement from 19.3 s to 8.4 s per instance (−57 %), so
+LKH windows cost about 11 s/pp instead of 25 s/pp, a third of beam paths' 35 s/pp (this report, on its own tsp10000 set).*
 
 ## Missing results
 

@@ -3,6 +3,12 @@
 1. **Does the LLM beat a fair parser on warehouse requests?** No. On template text p1 gets 200/200 requests right and q14 135/200; on the L2 paragraphs they tie, 84/200 against 81/200 requests exact (p = 0.81), 79.3 % against 81.4 % of rules (p = 0.27) and 60.0 % against 66.0 % of valid episodes (p = 0.17).
 2. **Does the hybrid beat both?** Not clearly: it keeps p1's 200/200 on L1 and ties q14 on L2 (41.0 % against 40.5 % of requests exact, 67.5 % against 66.0 % valid, p = 0.63), and its only edge over p1 on L2, 67.5 % against 60.0 % of valid episodes, has p = 0.04 before correcting for three tests and p = 0.21 without the texts the audit found wrong, while exact requests do not improve (41.0 % against 42.0 %).
 3. **What does a wrong translation cost?** Mostly validity, little time: on L2, 34 % of q14 episodes and 40 % of p1 episodes break a true rule where the oracle breaks none, those invalid routes look 2–3 % shorter (q14: makespan −2.9 ± 2.9 %, delay −2.3 ± 2.1 %), and the median request costs 0 %, but rules the LLM adds or widens, some of them from label errors in L2 itself, make 6 of 200 requests more than 20 % slower, up to +98 %.
+
+*Note 2026-11-04 (ablation A3, `../../docs/ablations_2026-11-03.md`): with no translation at all (no rule), 2 of 200
+episodes (1 %) satisfy the true rules, so nearly all the validity above comes from translating: on L2, p1 is +59 pp
+over not translating, q14 +65 pp and h1 +66 pp (McNemar p < 1e-35; q7 +47 pp on its 100 requests). For comparison, on
+the TSP of phase 5, 17–30 % of the routes are valid with no translation, and at n = 1000 on L2 q7 and g12 cannot be told
+apart from not translating there.*
 ## Design
 
 The world is written in code. Each shelf block holds one kind of product (normal, fragile, frozen, heavy), and an order has at most one special kind, a named customer and a priority (6 % urgent). Corridors 1–10 run east-west and give access to shelves; corridors 11–20 run north-south, hold no shelves, and only the stretch beside the shelves is closed so that crossings stay open. Stations are A–F. Robot type A carries everything and type B no heavy orders; that is a fact of the warehouse, enforced in every arm, so it is not a rule to translate. Texts are in English, as in phase 5; customer names are Portuguese.
