@@ -11,6 +11,13 @@ help LKH: as LKH's candidate set it is worse than the geometric ones, and as a t
 windows better than random only when few windows go to LKH (20 %), a gain that costs more network time than it
 saves, so at equal time random selection is as good or better.
 
+*Correction 2026-11-03 (ablations A1/A4, `../../docs/ablations_2026-11-03.md`): (a) with the batched scoring of `phase3_fast_triage_report.md`, the
+last clause is no longer true: at 10–20 % the learned signal beats random at equal time by 0.07–0.13 pp (3 of 3 seeds,
+both sets), and the disagreement by 0.05–0.07 pp on Fu-10k in 2 of 3 seeds. (b) Half of the LKH calls of "LKH on all windows" re-solve a window already solved: with a cache
+it takes 1.14 s / 10.9–11.4 s, not 2.02 / 22.92 s, for the same 3.92 / 3.85 %; LKH-3 at that budget still gives about
+0.11 % at 10k, so (2) holds. (c) In (1), the window gains are not the network's: SoftDist heatmaps (distances only, no
+learning) in the same window pipelines give 4.14 / 4.03 % with beam B = 10, against the network's 4.34 / 4.19 %.*
+
 **Key numbers.**
 - Equal time (E1 vs. E3): at the budget of triage top 20 % (0.72 s / 8.4 s) LKH-3 QUADRANT 5 reaches 0.079 % / 0.150 %
   against our 4.34 % / 4.21 %; at the budget of LKH on all windows (1.94 s / 21.5 s), 0.035 % / 0.081 % against 3.92 % /

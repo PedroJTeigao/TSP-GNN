@@ -18,6 +18,8 @@ Generated 2026-10-30 by scripts/phase3_triage_wsize_report.py. Greedy edge + 2-o
      (0.76–0.84 against 0.66–0.73). The network was trained on 20-city windows: in a rescaled 50-city window its p
      still says which windows improve, but not which gain the most. The learned model, retrained for w = 50, fixes
      this.
+     *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): this holds only without a window memo. With the cache or the
+     exclusion of windows already solved, the disagreement at w = 50 ties random at equal time (−0.06 to +0.04 pp).*
 2. **How much of the oracle does the learned signal recover?**
    - **w = 50.** On Fu-10k: 49 % at top 10 %, 62 % at top 20 % and 88 % at top 50 %. On tsp1000: 51 %, 65 % and 89 %.
      Random gets 37 / 56 / 90 % and the disagreement 34 / 50 / 80 %.
@@ -30,6 +32,11 @@ Generated 2026-10-30 by scripts/phase3_triage_wsize_report.py. Greedy edge + 2-o
    - Even random at w = 50, top 20 % (3.697 % in 15.0 s) beats it.
    - LKH on every w = 50 window gives 3.028 % in 63.6 s. Larger windows simply give LKH more to work with, and
      selecting 10–20 % of them is where the time is best spent.
+   - *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): "27 % faster" is no longer true. Half of the LKH calls of LKH on
+     every w = 20 window re-solve a window already solved; with a cache it takes 10.9 s on Fu-10k (all 16 instances,
+     3.845 %), while w = 50 + learned top 20 % with the same cache takes 15.1 s (3.615 %): 0.23 pp better but 39 %
+     slower. At about the same time (w = 50 learned top 10 %, 10.3 s, 3.861 %) the two tie. w = 50 wins only at budgets
+     above about 11 s.*
 
 ## Caveats
 

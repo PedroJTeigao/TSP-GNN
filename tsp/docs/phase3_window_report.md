@@ -172,6 +172,13 @@ One CPU process per solver/seed (5 in parallel), network on the GPU in batches.
    - **Cost per pp gained:** LKH windows with w = 20 cost about the same as beam paths or less (28 s/pp against 35 s/pp at n = 10000; 1.9 against 2.7 s/pp at n = 1000), and reach about twice the gain.
    - **Conclusion:** the TSP-20 model works as a local improver, but as a replacement for an exact window solver it is not competitive yet.
 
+*Correction 2026-11-03 (ablations A1/A4, `../../docs/ablations_2026-11-03.md`): (1) and (2) hold for the window pipeline, not for the model. A heatmap
+built from distances alone (SoftDist, one parameter τ = 0.75, no learning) beats the TSP-20 model in the same windows
+by 0.10–0.24 pp on the Fu et al. sets (beam B = 10, w = 20: 4.14 against 4.34 % at 1k and 4.03 against 4.19 % at 10k,
+16/16 instances at 10k), so the gain over greedy edge + 2-opt does not show that the network learned anything useful
+for paths. In (3), about half of the LKH window calls re-solve a window already solved (A1, ranked triage at 100 %): with
+a cache, LKH windows cost about half the time quoted here, so they are cheaper per pp than beam paths.*
+
 ## Missing results
 
 None.

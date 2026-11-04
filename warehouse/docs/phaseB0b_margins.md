@@ -84,6 +84,10 @@ The medium warehouse with corridors of width 1, more robots and proportionally m
 
 **Traffic never reaches 3 % for layer 1.** The baseline loses up to 24 % of its makespan to traffic at 131 % of free flow, yet hindsight on real edge times gains −0.4 to +1.8 % on the best rule without learning, all within noise or close to it, and at most +2.9 % on the Hungarian. Hindsight has the advantage of the best of 3 runs per seed. So no level of congestion in this range makes better distances worth more than 3 %. Congestion here is a problem of the planner: at 5 x 63 % of its calls fall back to PIBT. A model that acts on the planner rather than on layer 1 was not measured at these densities. γ grows from 0.46 to 0.86 with density.
 
+*Correction 2026-11-03 (ablation A5, `../../docs/ablations_2026-11-03.md`): "all within noise" is no longer true at 90
+robots. With 15 seeds, hindsight gains +1.6 % [0.7, 2.5] on map × γ (p = 0.002, 13 of 15 seeds): a real gain, still
+below 3 %, so the conclusion stands.*
+
 | times robots | robots | orders | baseline, % free flow | steps under PIBT % | baseline | Hungarian | static map | map x gamma | hindsight | best not learned | hindsight gain on it % | gain on Hungarian % | seeds |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 30 | 150 | 105 | 0 | 1007 | 953 | 952 | 944 | 947 | o2b2 | -0.4 ± 1.2 (p=0.438) | +0.6 ± 0.6 (p=0.125) | 5 |

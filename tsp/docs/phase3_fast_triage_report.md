@@ -19,6 +19,10 @@ tie.**
   network processes pay more for their own LKH calls.
 - **The 3-process diagnostic** suggested a win at 10k, but it used only the first 4 instances. The full sequential
   run (16 instances, 3 seeds) does not confirm it.
+- *Correction 2026-11-03 (ablations A1/A2, `../../docs/ablations_2026-11-03.md`): the tie on Fu-10k is at top 50 % only (−0.011 pp, the same sign in
+  5 of 5 repeated runs). At top 10–20 % the batched learned signal beats random at equal time by 0.07–0.13 pp, in all
+  3 seeds and in 5 of 5 runs, as the table "Same time" below already implied (learned 20 % at 8.13 s against random's
+  curve at that time).*
 
 ## The cheap scoring (version A)
 

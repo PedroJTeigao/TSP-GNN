@@ -214,3 +214,115 @@ the second method over the first, mean over seeds with a t-based 95 % CI; Wilcox
     `phase5_open_language_report.md`.)
 12. "Hindsight on traffic … all within noise" (B0b): at 90 robots it is +1.6 % [0.7, 2.5], p = 0.002. The gain is
     real, though still below 3 %, so the verdict holds but the wording does not. (A5; `phaseB0b_margins.md`.)
+
+## Corrections to the earlier reports (commit "ablation corrections")
+
+The sentences that stopped being true got a dated note in place; nothing was deleted. The diff, for review:
+
+```diff
+diff --git a/tsp/docs/phase3_benchmark_report.md b/tsp/docs/phase3_benchmark_report.md
+index 0bcf80c..42adf21 100644
+--- a/tsp/docs/phase3_benchmark_report.md
++++ b/tsp/docs/phase3_benchmark_report.md
+@@ -11,6 +11,13 @@ help LKH: as LKH's candidate set it is worse than the geometric ones, and as a t
+ windows better than random only when few windows go to LKH (20 %), a gain that costs more network time than it
+ saves, so at equal time random selection is as good or better.
+ 
++*Correction 2026-11-03 (ablations A1/A4, `../../docs/ablations_2026-11-03.md`): (a) with the batched scoring of `phase3_fast_triage_report.md`, the
++last clause is no longer true: at 10–20 % the learned signal beats random at equal time by 0.07–0.13 pp (3 of 3 seeds,
++both sets), and the disagreement by 0.05–0.07 pp on Fu-10k in 2 of 3 seeds. (b) Half of the LKH calls of "LKH on all windows" re-solve a window already solved: with a cache
++it takes 1.14 s / 10.9–11.4 s, not 2.02 / 22.92 s, for the same 3.92 / 3.85 %; LKH-3 at that budget still gives about
++0.11 % at 10k, so (2) holds. (c) In (1), the window gains are not the network's: SoftDist heatmaps (distances only, no
++learning) in the same window pipelines give 4.14 / 4.03 % with beam B = 10, against the network's 4.34 / 4.19 %.*
++
+ **Key numbers.**
+ - Equal time (E1 vs. E3): at the budget of triage top 20 % (0.72 s / 8.4 s) LKH-3 QUADRANT 5 reaches 0.079 % / 0.150 %
+   against our 4.34 % / 4.21 %; at the budget of LKH on all windows (1.94 s / 21.5 s), 0.035 % / 0.081 % against 3.92 % /
+diff --git a/tsp/docs/phase3_fast_triage_report.md b/tsp/docs/phase3_fast_triage_report.md
+index e61d582..91ce3c4 100644
+--- a/tsp/docs/phase3_fast_triage_report.md
++++ b/tsp/docs/phase3_fast_triage_report.md
+@@ -19,6 +19,10 @@ tie.**
+   network processes pay more for their own LKH calls.
+ - **The 3-process diagnostic** suggested a win at 10k, but it used only the first 4 instances. The full sequential
+   run (16 instances, 3 seeds) does not confirm it.
++- *Correction 2026-11-03 (ablations A1/A2, `../../docs/ablations_2026-11-03.md`): the tie on Fu-10k is at top 50 % only (−0.011 pp, the same sign in
++  5 of 5 repeated runs). At top 10–20 % the batched learned signal beats random at equal time by 0.07–0.13 pp, in all
++  3 seeds and in 5 of 5 runs, as the table "Same time" below already implied (learned 20 % at 8.13 s against random's
++  curve at that time).*
+ 
+ ## The cheap scoring (version A)
+ 
+diff --git a/tsp/docs/phase3_learned_triage_report.md b/tsp/docs/phase3_learned_triage_report.md
+index f00bd2a..4952202 100644
+--- a/tsp/docs/phase3_learned_triage_report.md
++++ b/tsp/docs/phase3_learned_triage_report.md
+@@ -31,6 +31,9 @@ Generated 2026-10-29 by scripts/phase3_learned_triage_report.py (models at commi
+    - **Why.** Scoring the windows costs about 4 s per 10k instance: building the window graphs, the network and the
+      features. That is more than the LKH time the better ranking saves. The features themselves add only
+      0.04 s / 0.4 s (1k / 10k) on top of the disagreement.
++   - *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): the "No" rests on the 4 s scoring of this report. With the batched
++     scoring (`phase3_fast_triage_report.md`) the learned signal beats random at equal time at top 10–20 % (0.07–0.13 pp
++     on Fu-10k), and with a window memo also at 50 %: 3.913 % in 8.7 s against random's 3.931 % in 9.7 s.*
+ 
+ ## What the features say
+ 
+diff --git a/tsp/docs/phase3_triage_wsize_report.md b/tsp/docs/phase3_triage_wsize_report.md
+index 9f3954f..b7b2e6b 100644
+--- a/tsp/docs/phase3_triage_wsize_report.md
++++ b/tsp/docs/phase3_triage_wsize_report.md
+@@ -18,6 +18,8 @@ Generated 2026-10-30 by scripts/phase3_triage_wsize_report.py. Greedy edge + 2-o
+      (0.76–0.84 against 0.66–0.73). The network was trained on 20-city windows: in a rescaled 50-city window its p
+      still says which windows improve, but not which gain the most. The learned model, retrained for w = 50, fixes
+      this.
++     *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): this holds only without a window memo. With the cache or the
++     exclusion of windows already solved, the disagreement at w = 50 ties random at equal time (−0.06 to +0.04 pp).*
+ 2. **How much of the oracle does the learned signal recover?**
+    - **w = 50.** On Fu-10k: 49 % at top 10 %, 62 % at top 20 % and 88 % at top 50 %. On tsp1000: 51 %, 65 % and 89 %.
+      Random gets 37 / 56 / 90 % and the disagreement 34 / 50 / 80 %.
+@@ -30,6 +32,11 @@ Generated 2026-10-30 by scripts/phase3_triage_wsize_report.py. Greedy edge + 2-o
+    - Even random at w = 50, top 20 % (3.697 % in 15.0 s) beats it.
+    - LKH on every w = 50 window gives 3.028 % in 63.6 s. Larger windows simply give LKH more to work with, and
+      selecting 10–20 % of them is where the time is best spent.
++   - *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): "27 % faster" is no longer true. Half of the LKH calls of LKH on
++     every w = 20 window re-solve a window already solved; with a cache it takes 10.9 s on Fu-10k (all 16 instances,
++     3.845 %), while w = 50 + learned top 20 % with the same cache takes 15.1 s (3.615 %): 0.23 pp better but 39 %
++     slower. At about the same time (w = 50 learned top 10 %, 10.3 s, 3.861 %) the two tie. w = 50 wins only at budgets
++     above about 11 s.*
+ 
+ ## Caveats
+ 
+diff --git a/tsp/docs/phase3_window_report.md b/tsp/docs/phase3_window_report.md
+index 10eda22..e6b0e05 100644
+--- a/tsp/docs/phase3_window_report.md
++++ b/tsp/docs/phase3_window_report.md
+@@ -172,6 +172,13 @@ One CPU process per solver/seed (5 in parallel), network on the GPU in batches.
+    - **Cost per pp gained:** LKH windows with w = 20 cost about the same as beam paths or less (28 s/pp against 35 s/pp at n = 10000; 1.9 against 2.7 s/pp at n = 1000), and reach about twice the gain.
+    - **Conclusion:** the TSP-20 model works as a local improver, but as a replacement for an exact window solver it is not competitive yet.
+ 
++*Correction 2026-11-03 (ablations A1/A4, `../../docs/ablations_2026-11-03.md`): (1) and (2) hold for the window pipeline, not for the model. A heatmap
++built from distances alone (SoftDist, one parameter τ = 0.75, no learning) beats the TSP-20 model in the same windows
++by 0.10–0.24 pp on the Fu et al. sets (beam B = 10, w = 20: 4.14 against 4.34 % at 1k and 4.03 against 4.19 % at 10k,
++16/16 instances at 10k), so the gain over greedy edge + 2-opt does not show that the network learned anything useful
++for paths. In (3), about half of the LKH window calls re-solve a window already solved (A1, ranked triage at 100 %): with
++a cache, LKH windows cost about half the time quoted here, so they are cheaper per pp than beam paths.*
++
+ ## Missing results
+ 
+ None.
+diff --git a/warehouse/docs/phaseB0b_margins.md b/warehouse/docs/phaseB0b_margins.md
+index 77b3385..b880158 100644
+--- a/warehouse/docs/phaseB0b_margins.md
++++ b/warehouse/docs/phaseB0b_margins.md
+@@ -84,6 +84,10 @@ The medium warehouse with corridors of width 1, more robots and proportionally m
+ 
+ **Traffic never reaches 3 % for layer 1.** The baseline loses up to 24 % of its makespan to traffic at 131 % of free flow, yet hindsight on real edge times gains −0.4 to +1.8 % on the best rule without learning, all within noise or close to it, and at most +2.9 % on the Hungarian. Hindsight has the advantage of the best of 3 runs per seed. So no level of congestion in this range makes better distances worth more than 3 %. Congestion here is a problem of the planner: at 5 x 63 % of its calls fall back to PIBT. A model that acts on the planner rather than on layer 1 was not measured at these densities. γ grows from 0.46 to 0.86 with density.
+ 
++*Correction 2026-11-03 (ablation A5, `../../docs/ablations_2026-11-03.md`): "all within noise" is no longer true at 90
++robots. With 15 seeds, hindsight gains +1.6 % [0.7, 2.5] on map × γ (p = 0.002, 13 of 15 seeds): a real gain, still
++below 3 %, so the conclusion stands.*
++
+ | times robots | robots | orders | baseline, % free flow | steps under PIBT % | baseline | Hungarian | static map | map x gamma | hindsight | best not learned | hindsight gain on it % | gain on Hungarian % | seeds |
+ |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+ | 1 | 30 | 150 | 105 | 0 | 1007 | 953 | 952 | 944 | 947 | o2b2 | -0.4 ± 1.2 (p=0.438) | +0.6 ± 0.6 (p=0.125) | 5 |
+```

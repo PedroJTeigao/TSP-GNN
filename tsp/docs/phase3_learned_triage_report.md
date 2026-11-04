@@ -31,6 +31,9 @@ Generated 2026-10-29 by scripts/phase3_learned_triage_report.py (models at commi
    - **Why.** Scoring the windows costs about 4 s per 10k instance: building the window graphs, the network and the
      features. That is more than the LKH time the better ranking saves. The features themselves add only
      0.04 s / 0.4 s (1k / 10k) on top of the disagreement.
+   - *Correction 2026-11-03 (ablation A1, `../../docs/ablations_2026-11-03.md`): the "No" rests on the 4 s scoring of this report. With the batched
+     scoring (`phase3_fast_triage_report.md`) the learned signal beats random at equal time at top 10–20 % (0.07–0.13 pp
+     on Fu-10k), and with a window memo also at 50 %: 3.913 % in 8.7 s against random's 3.931 % in 9.7 s.*
 
 ## What the features say
 
