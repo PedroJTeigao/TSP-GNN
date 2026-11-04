@@ -7,7 +7,7 @@ Equal time: a policy is compared with random at the same time on each instance, 
 curve (top 10 / 20 / 50 % and LKH on every window, same memo mode), as in the phase 3 triage report; Wilcoxon on the per-instance
 differences. Fu-1k: the learned selector was trained on half of Fu-1k, so the main rows use the other 64 instances.
 
-Writes results/ablations/a12.md, a12.json and tsp/docs/figs/ablation_a2_pareto.png.
+Writes results/ablations/a12.md and tsp/docs/figs/ablation_a2_pareto.png.
 
     python scripts/ablation_a12_report.py
 """
@@ -209,35 +209,40 @@ def table_anchors(an):
 
 
 def figure(stats, an):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    """Top row: our policies only (linear gap axis, so the memo modes can be told apart); bottom row: with the LKH-3 anchors."""
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     colors = {"none": "#2b6cb0", "cache": "#c05621", "exclude": "#2f855a"}
-    for ax, s in zip(axes, ("fu1k", "fu10k")):
-        for memo in ("none", "cache", "exclude"):
-            for policy, mk in (("random", "o"), ("dis", "s"), ("learned", "^"), ("all", "*")):
-                d = load(20, s, policy, 0, memo)
-                if d is None:
-                    continue
-                m = mask(s, len(next(iter(d.values()))["gap"]), True)
-                xs = sorted(d)
-                t = [d[x]["time"][m].mean() for x in xs]
-                g = [d[x]["gap"][m].mean() for x in xs]
-                ax.plot(t, g, marker=mk, color=colors[memo], ls="-" if policy != "all" else "none", ms=8 if policy == "all" else 5,
-                        label=f"{LABEL[policy]}, {MEMO[memo]}" if s == "fu1k" else None, alpha=0.9)
-                if s == "fu10k":
-                    for x, tt, gg in zip(xs, t, g):
-                        key = (policy, memo, x)
-                        if key in stats:
-                            q1, med, q3, _ = stats[key]
-                            ax.errorbar([med], [gg], xerr=[[med - q1], [q3 - med]], color="black", capsize=3, lw=1)
-        if s in an:
-            ax.plot([t for _, t, _ in an[s]], [g for _, _, g in an[s]], "D-", color="#6b46c1",
-                    label="LKH-3 QUADRANT 5, whole instance" if s == "fu1k" else None)
-        ax.set_xscale("log"); ax.set_yscale("log")
-        ax.set_xlabel("time per instance (s), 1 process, CPU"); ax.set_ylabel("gap to the E0 reference (%)")
-        ax.set_title({"fu1k": "Fu-1k (64 held-out instances)", "fu10k": "Fu-10k (16); black bars: IQR of 5 runs"}[s])
-        ax.grid(alpha=0.3, which="both")
+    for row, with_anchors in enumerate((False, True)):
+        for ax, s in zip(axes[row], ("fu1k", "fu10k")):
+            for memo in ("none", "cache", "exclude"):
+                for policy, mk in (("random", "o"), ("dis", "s"), ("learned", "^"), ("all", "*")):
+                    d = load(20, s, policy, 0, memo)
+                    if d is None:
+                        continue
+                    m = mask(s, len(next(iter(d.values()))["gap"]), True)
+                    xs = sorted(d)
+                    t = [d[x]["time"][m].mean() for x in xs]
+                    g = [d[x]["gap"][m].mean() for x in xs]
+                    ax.plot(t, g, marker=mk, color=colors[memo], ls="-" if policy != "all" else "none",
+                            ms=10 if policy == "all" else 5, alpha=0.9,
+                            label=f"{LABEL[policy]}, {MEMO[memo]}" if (s, row) == ("fu1k", 1) else None)
+                    if s == "fu10k":
+                        for x, gg in zip(xs, g):
+                            key = (policy, memo, x)
+                            if key in stats:
+                                q1, med, q3, _ = stats[key]
+                                ax.errorbar([med], [gg], xerr=[[med - q1], [q3 - med]], color="black", capsize=3, lw=1)
+            if with_anchors and s in an:
+                ax.plot([t for _, t, _ in an[s]], [g for _, _, g in an[s]], "D-", color="#6b46c1",
+                        label="LKH-3 QUADRANT 5, whole instance" if s == "fu1k" else None)
+                ax.set_yscale("log")
+            ax.set_xscale("log")
+            ax.set_xlabel("time per instance (s), 1 process, CPU"); ax.set_ylabel("gap to the E0 reference (%)")
+            title = {"fu1k": "Fu-1k (64 held-out instances)", "fu10k": "Fu-10k (16); black bars: IQR of 5 runs"}[s]
+            ax.set_title(title + (", with LKH-3" if with_anchors else ""), fontsize=10)
+            ax.grid(alpha=0.3, which="both")
     fig.legend(loc="lower center", ncol=4, fontsize=7, frameon=False)
-    fig.tight_layout(rect=(0, 0.16, 1, 1))
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
     os.makedirs("docs/figs", exist_ok=True)
     fig.savefig("docs/figs/ablation_a2_pareto.png", dpi=150)
 

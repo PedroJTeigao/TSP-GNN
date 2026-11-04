@@ -40,7 +40,9 @@ from tsp_gnn.window import initial_tour, make_solver, refine
 OUT = "results/ablations/a4"
 BENCH = "results/phase3_benchmark/data"
 SETS = {"fu1k": f"{BENCH}/tsp1000_test_concorde.npz", "fu10k": f"{BENCH}/tsp10000_test_concorde.npz"}
-TAUS = (0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5)
+# the first grid stopped at 0.5 and chose 0.5, its edge (results/ablations/a4_grid1): extended up to τ = inf (uniform
+# over the k-NN graph, so the beam only sees the graph)
+TAUS = (0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0, 5.0, float("inf"))
 TAU_SEED, TAU_N, TAU_NUM = 20261103, 1000, 20
 FEATURE_SETS = {"tsp200_test": "data/tsp200_test.npz", "tsp1000_test_concorde": SETS["fu1k"],
                 "tsp1000_test": "data/tsp1000_test.npz", "tsp10000_test_concorde": SETS["fu10k"]}
@@ -59,7 +61,7 @@ def solver(kind, tau):
 
 
 def chosen_tau():
-    return json.load(open(f"{OUT}/tau.json"))["tau"]
+    return float(json.load(open(f"{OUT}/tau.json"))["tau"])
 
 
 def stage_tau():

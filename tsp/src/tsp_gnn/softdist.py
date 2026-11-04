@@ -32,7 +32,8 @@ def batch_softdist(pts, tau):
     adj = np.zeros((W, m, m), dtype=bool)
     adj[np.arange(W)[:, None, None], np.arange(m)[None, :, None], nbr] = True
     adj |= adj.transpose(0, 2, 1)
-    logits = np.where(adj, -d / tau, -np.inf)
+    with np.errstate(invalid="ignore"):          # tau = inf: inf / inf on the diagonal, which is masked out
+        logits = np.where(adj, -d / tau, -np.inf)
     logits -= logits.max(axis=2, keepdims=True)
     s = np.exp(logits)
     s /= s.sum(axis=2, keepdims=True)
